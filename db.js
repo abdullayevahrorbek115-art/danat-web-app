@@ -3,7 +3,8 @@
 const fs = require("fs");
 const path = require("path");
 
-const FILE = path.join(__dirname, "data", "db.json");
+// Doimiy disk ulangan bo'lsa, DATA_DIR orqali uning yo'lini bering (masalan /data)
+const FILE = path.join(process.env.DATA_DIR || path.join(__dirname, "data"), "db.json");
 
 const defaults = () => ({
   settings: {
@@ -14,6 +15,12 @@ const defaults = () => ({
       "Xush kelibsiz! Bu yerda o'yinlar uchun tez va ishonchli donat qilishingiz mumkin.",
     minTopup: 5000,
     providerMode: "manual", // manual | api
+    buttons: [], // maxsus menyu tugmalari { id, label, type: "text"|"link", content }
+    provider: {}, // provayder sozlamalari (panel → Provayder)
+    admins: [], // panel orqali qo'shilgan adminlar (Telegram ID)
+    refBonus: 0, // taklif qilgan foydalanuvchiga bonus (so'm), 0 = o'chiq
+    requiredChannels: [], // majburiy obuna kanallari (@username)
+    ordersChat: "", // buyurtma xabarlari boradigan guruh/kanal (ID yoki @username)
   },
   games: [
     { id: 1, name: "PUBG Mobile", emoji: "🔫", needsServer: false, active: true, providerCode: "" },
@@ -25,6 +32,7 @@ const defaults = () => ({
   users: {}, // { id, name, username, balance, joined }
   orders: [],
   topups: [],
+  promos: [], // { code, amount, maxUses, usedBy: [], active }
   seq: { game: 4, pkg: 0, order: 0, topup: 0 },
 });
 

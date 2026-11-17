@@ -3,19 +3,28 @@ const { Composer, Keyboard, InlineKeyboard } = require("grammy");
 const { data, save, nextId } = require("./db");
 const { esc, fmt, show, MENU } = require("./util");
 const provider = require("./provider");
-const { processOrder, notifyAdmins, statusLabel } = require("./orders");
-const { adminIds } = require("./config");
+const { processOrder, notifyAdmins, notifyChat, statusLabel } = require("./orders");
+const { allAdmins } = require("./config");
 
 const user = new Composer();
 
-const mainKb = () =>
-  new Keyboard()
+const mainKb = () => {
+  const kb = new Keyboard()
     .text(MENU.shop)
     .text(MENU.bal)
     .row()
     .text(MENU.orders)
-    .text(MENU.help)
-    .resized();
+    .text(MENU.promo)
+    .row()
+    .text(MENU.ref)
+    .text(MENU.help);
+  // Admin paneldan qo'shilgan maxsus tugmalar (qatorda 2 tadan)
+  (data().settings.buttons || []).forEach((b, i) => {
+    if (i % 2 === 0) kb.row();
+    kb.text(b.label);
+  });
+  return kb.resized();
+};
 
 const reset = (ctx) => {
   ctx.session.step = null;
@@ -204,6 +213,23 @@ user.callbackQuery("topup", async (ctx) => {
   );
 });
 
+// ---------- Do'st taklif qilish ----------
+async function showReferral(ctx) {
+  const u = me(ctx);
+  const st = data().settings;
+  const link = `https://t.me/${ctx.me.username}?start=ref_${u.id}`;
+  const invited = Object.values(data().users).filter((x) => x.refBy === u.id);
+  const paid = invited.filter((x) => x.refPaid).length;
+  const bonusLine =
+    st.refBonus > 0
+      ? `\n🎁 Taklif qilgan do'stingiz birinchi marta hisobini to'ldirsa, sizga <b>${fmt(st.refBonus)}</b> bonus beriladi.`
+      : "";
+  await show(
+    ctx,
+    `👥 <b>Do'st taklif qilish</b>${bonusLine}\n\n🔗 Sizning havolangiz:\n<code>${link}</code>\n\nTaklif qilganlar: ${invited.length} ta (bonus olingan: ${paid} ta)`
+  );
+}
+
 // ---------- Matnli xabarlar ----------
 async function handleText(ctx) {
   const t = ctx.message.text.trim();
@@ -216,6 +242,27 @@ async function handleText(ctx) {
   if (t === MENU.help) {
     reset(ctx);
     await ctx.reply(`☎️ Aloqa: ${esc(st.contact)}`, { parse_mode: "HTML" });
+    return true;
+  }
+
+  if (t === MENU.promo) {
+    reset(ctx);
+    s.step = "u:promo";
+    await ctx.reply("🎁 Promo kodni yuboring:", { reply_markup: cancelKb() });
+    return true;
+  }
+  if (t === MENU.ref) { reset(ctx); await showReferral(ctx); return true; }
+
+  const custom = (st.buttons || []).find((b) => b.label === t);
+  if (custom) {
+    reset(ctx);
+    if (custom.type === "link") {
+      await ctx.reply("👇 " + custom.label, {
+        reply_markup: new InlineKeyboard().url(("🔗 " + custom.label).slice(0, 60), custom.content),
+      });
+    } else {
+      await ctx.reply(custom.content);
+    }
     return true;
   }
 
@@ -262,6 +309,31 @@ async function handleText(ctx) {
       );
       return true;
     }
+    case "u:promo": {
+      const code = t.toUpperCase().replace(/\s+/g, "");
+      const promo = data().promos.find((p) => p.code === code);
+      const u = me(ctx);
+      if (!promo || !promo.active) {
+        await ctx.reply("❌ Bunday promo kod topilmadi yoki o'chirilgan. Qayta yuboring:");
+        return true;
+      }
+      if (promo.maxUses > 0 && promo.usedBy.length >= promo.maxUses) {
+        reset(ctx);
+        await ctx.reply("😔 Bu promo kodning limiti tugagan.");
+        return true;
+      }
+      if (promo.usedBy.includes(u.id)) {
+        reset(ctx);
+        await ctx.reply("ℹ️ Siz bu promo koddan allaqachon foydalangansiz.");
+        return true;
+      }
+      promo.usedBy.push(u.id);
+      u.balance += promo.amount;
+      save();
+      reset(ctx);
+      await ctx.reply(`🎉 Promo kod qabul qilindi! Hisobingizga ${fmt(promo.amount)} qo'shildi.\n💰 Balans: ${fmt(u.balance)}`);
+      return true;
+    }
     case "u:receipt":
       await ctx.reply("📷 Iltimos, to'lov chekini rasm (skrinshot) ko'rinishida yuboring.");
       return true;
@@ -289,10 +361,11 @@ user.on("message:photo", async (ctx) => {
   reset(ctx);
 
   await ctx.reply(`✅ Chek yuborildi (#${t.id}). Admin tekshirib, hisobingizni to'ldiradi.`);
+  await notifyChat(ctx.api, `💳 Yangi to'lov cheki #${t.id}: ${esc(u.name)} — ${fmt(t.amount)}`);
 
   const caption = `💳 To'lov #${t.id}\n👤 ${u.name} ${u.username ? "@" + u.username : ""} (ID: ${u.id})\n💵 ${fmt(t.amount)}`;
   const kb = new InlineKeyboard().text("✅ Tasdiqlash", `a:ta:${t.id}`).text("❌ Rad etish", `a:tr:${t.id}`);
-  for (const id of adminIds) {
+  for (const id of allAdmins()) {
     try {
       await ctx.api.sendPhoto(id, t.fileId, { caption, reply_markup: kb });
     } catch (e) {

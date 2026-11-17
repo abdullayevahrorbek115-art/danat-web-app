@@ -1,6 +1,6 @@
 const { InlineKeyboard } = require("grammy");
 const { data, save } = require("./db");
-const { adminIds } = require("./config");
+const { allAdmins } = require("./config");
 const provider = require("./provider");
 const { esc, fmt } = require("./util");
 
@@ -22,8 +22,15 @@ async function safeSend(api, chatId, text, kb) {
   }
 }
 
+// Sozlangan guruh/kanalga (tugmalarsiz) xabar yuboradi
+async function notifyChat(api, text) {
+  const chat = data().settings.ordersChat;
+  if (chat) await safeSend(api, chat, text);
+}
+
 async function notifyAdmins(api, text, kb) {
-  for (const id of adminIds) await safeSend(api, id, text, kb);
+  for (const id of allAdmins()) await safeSend(api, id, text, kb);
+  await notifyChat(api, text);
 }
 
 function adminOrderText(o) {
@@ -54,10 +61,12 @@ async function processOrder(api, order) {
     r = await provider.deliver(order, game, pkg);
   } catch (e) {
     console.error("deliver xatosi:", e.message);
-    r = { ok: false, error: e.message };
+    // Natija noaniq (tarmoq xatosi, vaqt tugashi, 5xx): provayder buyurtmani bajargan bo'lishi mumkin,
+    // shuning uchun pul qaytarilmaydi — adminga qo'lda tekshirish uchun beriladi.
+    r = { ok: true, manual: true };
     await notifyAdmins(
       api,
-      `⚠️ Buyurtma #${order.id} avtomatik yetkazilmadi: ${esc(e.message)}\nPul foydalanuvchiga qaytarildi.`
+      `⚠️ Buyurtma #${order.id}: provayderdan aniq javob olinmadi (${esc(e.message)}). Avval provayder panelida buyurtma bajarilganini tekshiring, so'ng "Bajarildi" yoki "Bekor qilish" ni bosing.`
     );
   }
 
@@ -73,7 +82,11 @@ async function processOrder(api, order) {
   } else if (r.ok) {
     await completeOrder(api, order, r.ref);
   } else {
-    await cancelOrder(api, order, r.error);
+    await cancelOrder(api, order);
+    await notifyAdmins(
+      api,
+      `⚠️ Buyurtma #${order.id} provayder tomonidan rad etildi: ${esc(r.error || "sabab ko'rsatilmagan")}\nPul mijozga qaytarildi.`
+    );
   }
 }
 
@@ -88,6 +101,7 @@ async function completeOrder(api, order, ref) {
     order.userId,
     `✅ Buyurtma #${order.id} yetkazildi!\n🎮 ${esc(order.gameName)} — ${esc(order.pkgName)}\n🆔 <code>${esc(order.playerId)}</code>\n\nRahmat! 🙌`
   );
+  await notifyChat(api, `✅ Buyurtma #${order.id} bajarildi: ${esc(order.gameName)} — ${esc(order.pkgName)}`);
   return true;
 }
 
@@ -111,6 +125,7 @@ module.exports = {
   completeOrder,
   cancelOrder,
   notifyAdmins,
+  notifyChat,
   safeSend,
   adminOrderText,
   orderKb,

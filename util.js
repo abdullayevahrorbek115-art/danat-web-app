@@ -2,6 +2,8 @@ const MENU = {
   shop: "🎮 Donat olish",
   bal: "💰 Hisobim",
   orders: "📦 Buyurtmalarim",
+  promo: "🎁 Promo kod",
+  ref: "👥 Do'st taklif qilish",
   help: "☎️ Aloqa",
 };
 

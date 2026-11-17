@@ -36,3 +36,30 @@ Hammasi `data/db.json` da saqlanadi. Uni vaqti-vaqti bilan zaxiralab turing.
 
 ## Serverga joylash
 Doimiy ishlashi uchun VPS/Railway/Render da `pm2 start bot.js --name donat-bot` kabi ishga tushiring.
+
+## Qo'shimcha imkoniyatlar
+- 🎁 **Promo kodlar**: panel → Promo kodlar. Kod, summa va limit belgilanadi; foydalanuvchi menyudagi "Promo kod" tugmasi orqali kiritadi va hisobiga summa qo'shiladi (bir kishi bir marta).
+- 👥 **Do'st taklif qilish**: har bir foydalanuvchining shaxsiy havolasi bor. Taklif qilingan do'st birinchi marta hisobini to'ldirganda (admin chekni tasdiqlaganda) taklif qilgan kishiga bonus beriladi. Bonus summasi: panel → Sozlamalar → "Do'st taklif bonusi" (0 = o'chiq).
+- 📡 **Kanal/guruh**: panel → Kanal/guruh.
+  - *Majburiy obuna*: kanal username'ini qo'shing (bot kanalda admin bo'lishi shart). A'zo bo'lmaganlar botdan foydalana olmaydi.
+  - *Buyurtmalar guruhi/kanali*: yangi buyurtma, chek va bajarilgan buyurtma xabarlari shu yerga ham boradi. Guruh ID sini bilish uchun botni guruhga qo'shib, guruhda `/chatid` yozing.
+
+## Adminlar
+Panel → 👮 Adminlar. `.env` dagi `ADMIN_IDS` — bosh adminlar: ular boshqa admin qo'sha oladi va olib tashlay oladi. Qo'shilgan adminlar panelni to'liq ishlata oladi, lekin adminlarni boshqara olmaydi. Yangi adminning ID sini bilish uchun u botga `/myid` yozadi.
+
+## Provayderni admin paneldan ulash (🔌 Provayder)
+Kod yozish shart emas. Panel → 🔌 Provayder (faqat bosh adminlar):
+1. **Manzil** va **API kalit** ni kiriting; kalit qaysi sarlavhada yuborilishini ko'rsating.
+2. **ID tekshirish** va **Buyurtma** bo'limlarida so'rov yo'li, JSON shabloni va javobdagi maydon yo'llarini provayder hujjatiga moslang (standart qiymatlar bor).
+3. **🧪 Sinash** tugmasi bilan haqiqiy ID ni tekshirib, provayderning xom javobini ko'ring va yo'llarni shunga qarab to'g'rilang.
+4. Har bir o'yinga **provayder kodi**, paketga **SKU** kiriting, rejimni **API** ga o'tkazing va avval kichik buyurtma bilan sinang.
+
+Cheklov: faqat oddiy JSON API lar (kalit sarlavhada yoki so'rovda) qo'llab-quvvatlanadi. Imzo (MD5/HMAC) talab qiladigan yoki natijani keyin webhook orqali yuboradigan provayderlar uchun qo'shimcha kod kerak.
+
+Xavfsizlik: provayder javobi noaniq bo'lsa (tarmoq xatosi, vaqt tugashi, 5xx), pul qaytarilmaydi — buyurtma adminga qo'lda tekshirish uchun beriladi. Provayder aniq rad etsa, pul mijozga avtomatik qaytadi.
+
+## Menyu tugmalari
+Panel → 🔘 Tugmalar. Foydalanuvchi menyusiga o'zingizning tugmalaringizni qo'shasiz (12 tagacha):
+- 📝 **Matnli**: bosilganda botdan matn chiqadi (qoidalar, narxlar, aloqa...).
+- 🔗 **Havolali**: bosilganda havola tugmasi chiqadi (kanal, sayt...).
+Yangi tugma foydalanuvchida /start bosganda yoki «📢 Xabar yuborish» dan keyin paydo bo'ladi (xabar yuborganda menyu ham yangilanadi).
