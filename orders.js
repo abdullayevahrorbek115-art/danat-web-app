@@ -40,7 +40,7 @@ function adminOrderText(o) {
     `👤 ${esc(u.name || "")} ${u.username ? "@" + esc(u.username) : ""} (<code>${o.userId}</code>)`,
     `🎮 ${esc(o.gameName)} — ${esc(o.pkgName)}`,
     `💵 ${fmt(o.price)}`,
-    `🆔 ID: <code>${esc(o.playerId)}</code>`,
+    o.kind === "tg" ? `👤 Username: <code>${esc(o.playerId)}</code>` : `🆔 ID: <code>${esc(o.playerId)}</code>`,
   ];
   if (o.serverId) lines.push(`🌐 Server: <code>${esc(o.serverId)}</code>`);
   if (o.nickname) lines.push(`👤 Nik: ${esc(o.nickname)}`);

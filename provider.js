@@ -92,6 +92,20 @@ async function call(path, tpl, vars) {
   return { status: res.status, text, json };
 }
 
+// Sozlangan yo'l bo'sh qaytsa, keng tarqalgan nomlar bo'yicha qidiradi
+const NICK_KEYS = ["nickname", "nick", "nick_name", "username", "user_name", "name", "player_name", "playerName", "role_name", "roleName"];
+function findNick(obj, depth = 0) {
+  if (!obj || typeof obj !== "object" || depth > 3) return null;
+  for (const k of NICK_KEYS) {
+    if (typeof obj[k] === "string" && obj[k].trim()) return obj[k].trim();
+  }
+  for (const v of Object.values(obj)) {
+    const r = findNick(v, depth + 1);
+    if (r) return r;
+  }
+  return null;
+}
+
 const apiEnabled = () => data().settings.providerMode === "api";
 
 // -> { ok, nickname } ; nickname null bo'lsa — tekshirilmagan
@@ -104,7 +118,13 @@ async function checkId(game, playerId, serverId) {
     server_id: serverId || "",
   });
   if (!r.json) throw new Error(`Provayder JSON qaytarmadi (HTTP ${r.status})`);
-  return { ok: truthy(r.json, c.checkOk), nickname: getPath(r.json, c.checkNick) || null };
+  const ok = truthy(r.json, c.checkOk);
+  let nickname = getPath(r.json, c.checkNick) || null;
+  if (ok && !nickname) {
+    nickname = findNick(r.json);
+    if (!nickname) console.warn("ID topildi, lekin nik yo'li (checkNick) javobga mos kelmadi. Javob:", r.text.slice(0, 500));
+  }
+  return { ok, nickname: nickname ? String(nickname) : null };
 }
 
 // -> { ok:true, manual:true } | { ok:true, ref } | { ok:false, error }

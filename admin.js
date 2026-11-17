@@ -63,7 +63,7 @@ async function panel(ctx) {
 // "a:" bilan boshlanadigan har bir tugma bosilganda kutilayotgan kiritish bekor bo'ladi
 adm.on("callback_query:data", async (ctx, next) => {
   const d = ctx.callbackQuery.data;
-  if (d.startsWith("a:") && d !== "a:bcy") reset(ctx);
+  if (d.startsWith("a:") && d !== "a:bcy" && !d.startsWith("a:bf")) reset(ctx);
   await next();
 });
 
@@ -88,7 +88,8 @@ async function gamesList(ctx) {
   data().games.forEach((g) =>
     kb.text(`${g.active ? "✅" : "🚫"} ${g.emoji} ${g.name}`, `a:g:${g.id}`).row()
   );
-  kb.text("➕ O'yin qo'shish", "a:gn").row().text("⬅️ Orqaga", "a:home");
+  kb.text("➕ O'yin qo'shish", "a:gn").row();
+  kb.text("⭐ Telegram Premium/Stars qo'shish", "a:gtg").row().text("⬅️ Orqaga", "a:home");
   await show(ctx, "🎮 <b>O'yinlar</b>\nTahrirlash uchun o'yinni tanlang:", kb);
 }
 
@@ -99,6 +100,7 @@ async function gameMenu(ctx, id) {
   const text =
     `${g.emoji} <b>${esc(g.name)}</b>\n` +
     `Holat: ${g.active ? "✅ yoqilgan" : "🚫 o'chirilgan"}\n` +
+    `Turi: ${g.kind === "tg" ? "⭐ Telegram (username so'raladi)" : "🎮 O'yin (Player ID so'raladi)"}\n` +
     `Server ID so'rash: ${g.needsServer ? "ha" : "yo'q"}\n` +
     `Provayder kodi: ${g.providerCode ? "<code>" + esc(g.providerCode) + "</code>" : "—"}\n` +
     `Paketlar: ${n} ta`;
@@ -111,6 +113,8 @@ async function gameMenu(ctx, id) {
     .text("🔑 Provayder kodi", `a:gc:${g.id}`)
     .row()
     .text(g.needsServer ? "🌐 Server ID: yoqilgan" : "🌐 Server ID: o'chiq", `a:gs:${g.id}`)
+    .row()
+    .text(g.kind === "tg" ? "⭐ Turi: Telegram (username)" : "🎮 Turi: O'yin (ID)", `a:gk:${g.id}`)
     .row()
     .text(g.active ? "🚫 Vaqtincha o'chirish" : "✅ Yoqish", `a:gt:${g.id}`)
     .row()
@@ -132,6 +136,27 @@ adm.callbackQuery(/^a:gs:(\d+)$/, async (ctx) => {
   if (g) { g.needsServer = !g.needsServer; save(); }
   await ctx.answerCallbackQuery();
   await gameMenu(ctx, ctx.match[1]);
+});
+adm.callbackQuery(/^a:gk:(\d+)$/, async (ctx) => {
+  const g = findGame(ctx.match[1]);
+  if (g) {
+    g.kind = g.kind === "tg" ? "game" : "tg";
+    if (g.kind === "tg") g.needsServer = false;
+    save();
+  }
+  await ctx.answerCallbackQuery();
+  await gameMenu(ctx, ctx.match[1]);
+});
+adm.callbackQuery("a:gtg", async (ctx) => {
+  let added = 0;
+  for (const [name, emoji] of [["Telegram Premium", "💎"], ["Telegram Stars", "⭐"]]) {
+    if (data().games.some((g) => g.name === name)) continue;
+    data().games.push({ id: nextId("game"), name, emoji, needsServer: false, active: true, providerCode: "", kind: "tg" });
+    added++;
+  }
+  save();
+  await ctx.answerCallbackQuery({ text: added ? "✅ Qo'shildi. Endi paketlarni kiriting." : "Ular allaqachon bor", show_alert: !!added });
+  await gamesList(ctx);
 });
 adm.callbackQuery(/^a:gt:(\d+)$/, async (ctx) => {
   const g = findGame(ctx.match[1]);
@@ -668,6 +693,22 @@ adm.callbackQuery("a:pt", async (ctx) => {
 
 // ---------- Maxsus menyu tugmalari ----------
 const MAX_BUTTONS = 12;
+const BTN_ICON = { text: "📝", link: "🔗", func: "⚙️" };
+const FUNCS = {
+  shop: "🎮 Donat olish (o'yinlar ro'yxati)",
+  bal: "💰 Hisobim",
+  orders: "📦 Buyurtmalarim",
+  topup: "💳 Hisobni to'ldirish",
+  promo: "🎁 Promo kod",
+  ref: "👥 Do'st taklif qilish",
+  help: "☎️ Aloqa",
+};
+const funcName = (fn) => {
+  if (FUNCS[fn]) return FUNCS[fn];
+  const m = /^game:(\d+)$/.exec(fn || "");
+  const g = m && findGame(m[1]);
+  return g ? `${g.emoji} ${g.name} bo'limi` : "?";
+};
 
 function normContent(type, t) {
   const x = String(t).trim();
@@ -680,12 +721,13 @@ const findBtn = (id) => (data().settings.buttons || []).find((b) => b.id === Num
 async function btnScreen(ctx) {
   const list = data().settings.buttons || [];
   const kb = new InlineKeyboard();
-  list.forEach((b) => kb.text(`${b.type === "link" ? "🔗" : "📝"} ${b.label}`, `a:btd:${b.id}`).row());
+  list.forEach((b) => kb.text(`${BTN_ICON[b.type] || "📝"} ${b.label}`, `a:btd:${b.id}`).row());
   kb.text("➕ Matnli tugma", "a:btnew:text").text("➕ Havolali tugma", "a:btnew:link").row();
+  kb.text("➕ Funksiyali tugma", "a:btnew:func").row();
   kb.text("⬅️ Orqaga", "a:home");
   await show(
     ctx,
-    "🔘 <b>Menyu tugmalari</b>\n📝 Matnli — bosilganda botdan xabar chiqadi (qoidalar, narxlar, aloqa...).\n🔗 Havolali — bosilganda havola tugmasi chiqadi (kanal, sayt...).\n\nTugmalar foydalanuvchi menyusiga qo'shiladi. Foydalanuvchilarda yangi tugmalar /start bosganda yoki «Xabar yuborish» dan keyin paydo bo'ladi.",
+    "🔘 <b>Menyu tugmalari</b>\n📝 Matnli — bosilganda botdan xabar chiqadi (qoidalar, narxlar, aloqa...).\n🔗 Havolali — bosilganda havola tugmasi chiqadi (kanal, sayt...).\n⚙️ Funksiyali — bosilganda bot funksiyasi ishlaydi (masalan «⭐ Stars» → Stars paketlari ro'yxati).\n\nTugmalar foydalanuvchi menyusiga qo'shiladi. Foydalanuvchilarda yangi tugmalar /start bosganda yoki «Xabar yuborish» dan keyin paydo bo'ladi.",
     kb
   );
 }
@@ -693,23 +735,22 @@ async function btnScreen(ctx) {
 async function btnMenu(ctx, id) {
   const b = findBtn(id);
   if (!b) return btnScreen(ctx);
-  const kb = new InlineKeyboard()
-    .text("✏️ Nomi", `a:btl:${b.id}`)
-    .text(b.type === "link" ? "✏️ Havola" : "✏️ Matn", `a:btc:${b.id}`)
-    .row()
+  const kb = new InlineKeyboard().text("✏️ Nomi", `a:btl:${b.id}`);
+  if (b.type !== "func") kb.text(b.type === "link" ? "✏️ Havola" : "✏️ Matn", `a:btc:${b.id}`);
+  kb.row()
     .text("🗑 O'chirish", `a:btx:${b.id}`)
     .row()
     .text("⬅️ Orqaga", "a:btns");
   const content = b.content.length > 300 ? b.content.slice(0, 300) + "…" : b.content;
   await show(
     ctx,
-    `🔘 <b>${esc(b.label)}</b>\nTuri: ${b.type === "link" ? "🔗 havolali" : "📝 matnli"}\n\n${esc(content)}`,
+    `🔘 <b>${esc(b.label)}</b>\nTuri: ${b.type === "link" ? "🔗 havolali" : b.type === "func" ? "⚙️ funksiyali" : "📝 matnli"}\n\n${b.type === "func" ? esc(funcName(b.content)) : esc(content)}`,
     kb
   );
 }
 
 adm.callbackQuery("a:btns", async (ctx) => { await ctx.answerCallbackQuery(); await btnScreen(ctx); });
-adm.callbackQuery(/^a:btnew:(text|link)$/, async (ctx) => {
+adm.callbackQuery(/^a:btnew:(text|link|func)$/, async (ctx) => {
   if ((data().settings.buttons || []).length >= MAX_BUTTONS) {
     return ctx.answerCallbackQuery({ text: `Eng ko'pi bilan ${MAX_BUTTONS} ta tugma qo'shish mumkin`, show_alert: true });
   }
@@ -720,6 +761,27 @@ adm.callbackQuery(/^a:btnew:(text|link)$/, async (ctx) => {
     "🔘 Tugma nomini yuboring (30 belgigacha, emoji bilan chiroyli ko'rinadi), masalan: <code>📜 Qoidalar</code>"
   );
 });
+// Funksiya tanlash (tugma nomi session.tmp da turibdi)
+adm.callbackQuery(/^a:bf:(\w+)$/, async (ctx) => {
+  const s = ctx.session;
+  const fn = ctx.match[1];
+  if (s.step !== "adm:btfunc" || !s.tmp.label || !FUNCS[fn]) return ctx.answerCallbackQuery({ text: "Sessiya eskirdi", show_alert: true });
+  await finishFuncBtn(ctx, fn);
+});
+adm.callbackQuery(/^a:bfg:(\d+)$/, async (ctx) => {
+  const s = ctx.session;
+  if (s.step !== "adm:btfunc" || !s.tmp.label || !findGame(ctx.match[1])) return ctx.answerCallbackQuery({ text: "Sessiya eskirdi", show_alert: true });
+  await finishFuncBtn(ctx, "game:" + ctx.match[1]);
+});
+async function finishFuncBtn(ctx, fn) {
+  const label = ctx.session.tmp.label;
+  const id = nextId("btn");
+  data().settings.buttons.push({ id, label, type: "func", content: fn });
+  save();
+  reset(ctx);
+  await ctx.answerCallbackQuery({ text: "✅ Qo'shildi" });
+  await btnMenu(ctx, id);
+}
 adm.callbackQuery(/^a:btd:(\d+)$/, async (ctx) => { await ctx.answerCallbackQuery(); await btnMenu(ctx, ctx.match[1]); });
 adm.callbackQuery(/^a:btl:(\d+)$/, (ctx) => ask(ctx, "adm:btelabel", { id: ctx.match[1] }, "✏️ Tugmaning yangi nomini yuboring:"));
 adm.callbackQuery(/^a:btc:(\d+)$/, async (ctx) => {
@@ -768,7 +830,7 @@ async function adminText(ctx) {
   switch (s.step) {
     case "adm:gname": {
       const id = nextId("game");
-      data().games.push({ id, name: t.slice(0, 40), emoji: "🎮", needsServer: false, active: true, providerCode: "" });
+      data().games.push({ id, name: t.slice(0, 40), emoji: "🎮", needsServer: false, active: true, providerCode: "", kind: "game" });
       save();
       reset(ctx);
       await ctx.reply("✅ O'yin qo'shildi.");
@@ -1048,6 +1110,15 @@ async function adminText(ctx) {
         return true;
       }
       tmp.label = label;
+      if (tmp.type === "func") {
+        s.step = "adm:btfunc";
+        const fk = new InlineKeyboard();
+        for (const [k, v] of Object.entries(FUNCS)) fk.text(v, `a:bf:${k}`).row();
+        data().games.forEach((g) => fk.text(`${g.emoji} ${g.name} bo'limi`, `a:bfg:${g.id}`).row());
+        fk.text("❌ Bekor qilish", "a:home");
+        await ctx.reply("⚙️ Tugma bosilganda qaysi funksiya ishlasin?", { reply_markup: fk });
+        return true;
+      }
       s.step = "adm:btcontent";
       await ctx.reply(
         tmp.type === "link"

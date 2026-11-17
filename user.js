@@ -52,16 +52,20 @@ user.callbackQuery("games", async (ctx) => {
   await showGames(ctx);
 });
 
-user.callbackQuery(/^g:(\d+)$/, async (ctx) => {
-  await ctx.answerCallbackQuery();
-  const game = data().games.find((g) => g.id === Number(ctx.match[1]));
-  if (!game || !game.active) return show(ctx, "O'yin topilmadi.");
+async function showGame(ctx, gameId) {
+  const game = data().games.find((g) => g.id === Number(gameId));
+  if (!game || !game.active) return show(ctx, "Bo'lim topilmadi yoki vaqtincha o'chirilgan.");
   const list = data().packages.filter((p) => p.gameId === game.id && p.active);
   const kb = new InlineKeyboard();
   list.forEach((p) => kb.text(`${p.name} — ${fmt(p.price)}`, `p:${p.id}`).row());
   kb.text("⬅️ Orqaga", "games");
   const head = `${game.emoji} <b>${esc(game.name)}</b>\n`;
   await show(ctx, head + (list.length ? "Paketni tanlang:" : "Hozircha paketlar yo'q."), kb);
+}
+
+user.callbackQuery(/^g:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await showGame(ctx, ctx.match[1]);
 });
 
 user.callbackQuery(/^p:(\d+)$/, async (ctx) => {
@@ -73,7 +77,10 @@ user.callbackQuery(/^p:(\d+)$/, async (ctx) => {
   ctx.session.step = "u:id";
   ctx.session.tmp = { pkgId: pkg.id };
   await ctx.reply(
-    `${game.emoji} <b>${esc(game.name)}</b> — ${esc(pkg.name)}\n💵 ${fmt(pkg.price)}\n\n🆔 O'yindagi <b>Player ID</b> raqamingizni yuboring:`,
+    `${game.emoji} <b>${esc(game.name)}</b> — ${esc(pkg.name)}\n💵 ${fmt(pkg.price)}\n\n` +
+      (game.kind === "tg"
+        ? "👤 Donat yuboriladigan <b>Telegram username</b> ni yuboring (masalan: <code>@username</code>):"
+        : "🆔 O'yindagi <b>Player ID</b> raqamingizni yuboring:"),
     { parse_mode: "HTML", reply_markup: cancelKb() }
   );
 });
@@ -107,7 +114,7 @@ async function verifyAccount(ctx) {
     s.step = "u:id";
     delete s.tmp.playerId;
     delete s.tmp.serverId;
-    await ctx.reply("❌ Bunday ID topilmadi. To'g'ri ID yuboring:", { reply_markup: cancelKb() });
+    await ctx.reply(game.kind === "tg" ? "❌ Bunday username topilmadi. To'g'ri username yuboring:" : "❌ Bunday ID topilmadi. To'g'ri ID yuboring:", { reply_markup: cancelKb() });
     return;
   }
   s.tmp.nickname = r.nickname || "";
@@ -116,7 +123,9 @@ async function verifyAccount(ctx) {
   const lines = [
     `${game.emoji} <b>${esc(game.name)}</b> — ${esc(pkg.name)}`,
     `💵 Narxi: <b>${fmt(pkg.price)}</b>`,
-    `🆔 ID: <code>${esc(s.tmp.playerId)}</code>`,
+    game.kind === "tg"
+      ? `👤 Username: <code>${esc(s.tmp.playerId)}</code>`
+      : `🆔 ID: <code>${esc(s.tmp.playerId)}</code>`,
   ];
   if (s.tmp.serverId) lines.push(`🌐 Server: <code>${esc(s.tmp.serverId)}</code>`);
   if (r.nickname) {
@@ -124,7 +133,9 @@ async function verifyAccount(ctx) {
   } else {
     lines.push(
       "",
-      "⚠️ ID avtomatik tekshirilmadi. ID to'g'riligini yaxshilab tekshiring — xato ID ga yuborilgan donat qaytarilmaydi."
+      game.kind === "tg"
+        ? "⚠️ Username to'g'riligini yaxshilab tekshiring — xato akkauntga yuborilgan Premium/Stars qaytarilmaydi."
+        : "⚠️ ID avtomatik tekshirilmadi. ID to'g'riligini yaxshilab tekshiring — xato ID ga yuborilgan donat qaytarilmaydi."
     );
   }
   const kb = new InlineKeyboard()
@@ -172,6 +183,7 @@ user.callbackQuery("buy", async (ctx) => {
     playerId: tmp.playerId,
     serverId: tmp.serverId || "",
     nickname: tmp.nickname || "",
+    kind: game.kind || "game",
     status: "processing",
     createdAt: Date.now(),
   };
@@ -230,6 +242,32 @@ async function showReferral(ctx) {
   );
 }
 
+// ---------- Funksiyali tugmalar ----------
+// content: shop | bal | orders | promo | ref | help | topup | game:<id>
+async function runFunc(ctx, fn) {
+  const st = data().settings;
+  if (fn === "shop") return showGames(ctx);
+  if (fn === "bal") return showBalance(ctx);
+  if (fn === "orders") return showOrders(ctx);
+  if (fn === "ref") return showReferral(ctx);
+  if (fn === "help") return ctx.reply(`☎️ Aloqa: ${esc(st.contact)}`, { parse_mode: "HTML" });
+  if (fn === "promo") {
+    ctx.session.step = "u:promo";
+    return ctx.reply("🎁 Promo kodni yuboring:", { reply_markup: cancelKb() });
+  }
+  if (fn === "topup") {
+    ctx.session.step = "u:topamount";
+    ctx.session.tmp = {};
+    return ctx.reply(
+      `💳 Qancha summaga to'ldirmoqchisiz?\nMinimal: ${fmt(st.minTopup)}\n\nSummani raqam bilan yozing (masalan: 50000):`,
+      { reply_markup: cancelKb() }
+    );
+  }
+  const m = /^game:(\d+)$/.exec(fn || "");
+  if (m) return showGame(ctx, m[1]);
+  return ctx.reply("Bu tugma hozircha ishlamaydi.");
+}
+
 // ---------- Matnli xabarlar ----------
 async function handleText(ctx) {
   const t = ctx.message.text.trim();
@@ -256,6 +294,10 @@ async function handleText(ctx) {
   const custom = (st.buttons || []).find((b) => b.label === t);
   if (custom) {
     reset(ctx);
+    if (custom.type === "func") {
+      await runFunc(ctx, custom.content);
+      return true;
+    }
     if (custom.type === "link") {
       await ctx.reply("👇 " + custom.label, {
         reply_markup: new InlineKeyboard().url(("🔗 " + custom.label).slice(0, 60), custom.content),
@@ -268,12 +310,22 @@ async function handleText(ctx) {
 
   switch (s.step) {
     case "u:id": {
+      const { game } = lookup(s.tmp.pkgId);
+      if (!game) { reset(ctx); await ctx.reply("Paket topilmadi."); return true; }
+      if (game.kind === "tg") {
+        const uname = t.replace(/^https?:\/\/t\.me\//i, "").replace(/^@/, "");
+        if (!/^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(uname)) {
+          await ctx.reply("❗️ Username noto'g'ri. Masalan: @username (5–32 belgi, lotin harflari, raqam va _). Qayta yuboring:");
+          return true;
+        }
+        s.tmp.playerId = "@" + uname;
+        await verifyAccount(ctx);
+        return true;
+      }
       if (!/^\d{5,15}$/.test(t)) {
         await ctx.reply("❗️ ID faqat raqamlardan iborat bo'lishi kerak (5–15 ta raqam). Qayta yuboring:");
         return true;
       }
-      const { game } = lookup(s.tmp.pkgId);
-      if (!game) { reset(ctx); await ctx.reply("Paket topilmadi."); return true; }
       s.tmp.playerId = t;
       if (game.needsServer) {
         s.step = "u:server";

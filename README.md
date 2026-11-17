@@ -63,3 +63,15 @@ Panel → 🔘 Tugmalar. Foydalanuvchi menyusiga o'zingizning tugmalaringizni qo
 - 📝 **Matnli**: bosilganda botdan matn chiqadi (qoidalar, narxlar, aloqa...).
 - 🔗 **Havolali**: bosilganda havola tugmasi chiqadi (kanal, sayt...).
 Yangi tugma foydalanuvchida /start bosganda yoki «📢 Xabar yuborish» dan keyin paydo bo'ladi (xabar yuborganda menyu ham yangilanadi).
+
+## ⭐ Telegram Premium / Stars
+Panel → 🎮 O'yinlar → «⭐ Telegram Premium/Stars qo'shish». Ikkita bo'lim yaratiladi (turi: Telegram). Keyin har biriga **📦 Paketlar** orqali paket va narx kiriting (masalan: Premium 3 oy, Stars 100 ta).
+- Bunday bo'limda mijozdan Player ID o'rniga **Telegram username** (@username) so'raladi.
+- Istalgan o'yinni ham ⭐ turiga o'tkazish mumkin (o'yin menyusida «Turi» tugmasi).
+- Username Telegram orqali tekshirib bo'lmaydi, shuning uchun u qo'lda yetkaziladi (admin «Bajarildi» bosadi) yoki provayder API si orqali.
+
+## ⚙️ Funksiyali tugmalar
+Panel → 🔘 Tugmalar → «➕ Funksiyali tugma». Nomini yozing, so'ng funksiyani tanlang: o'yinlar ro'yxati, hisob, buyurtmalar, hisobni to'ldirish, promo kod, do'st taklif qilish, aloqa yoki **aniq bir bo'lim** (masalan «⭐ Stars» → Stars paketlari).
+
+## 👤 ID tekshirishda nik
+Nik faqat provayder API si orqali olinadi (rejim `api`, o'yinda provayder kodi bor). Nik chiqmasa: 🔌 Provayder → 🧪 Sinash bilan xom javobni ko'ring va «Javobdagi nik yo'li» ni shunga moslang. Bot endi yo'l noto'g'ri bo'lsa ham `nickname`, `name`, `username` kabi keng tarqalgan nomlarni o'zi qidiradi.
