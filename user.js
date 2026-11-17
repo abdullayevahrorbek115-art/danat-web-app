@@ -1,0 +1,304 @@
+// Foydalanuvchi qismi: o'yin tanlash -> paket -> ID kiritish -> tekshirish -> to'lov -> yetkazish
+const { Composer, Keyboard, InlineKeyboard } = require("grammy");
+const { data, save, nextId } = require("./db");
+const { esc, fmt, show, MENU } = require("./util");
+const provider = require("./provider");
+const { processOrder, notifyAdmins, statusLabel } = require("./orders");
+const { adminIds } = require("./config");
+
+const user = new Composer();
+
+const mainKb = () =>
+  new Keyboard()
+    .text(MENU.shop)
+    .text(MENU.bal)
+    .row()
+    .text(MENU.orders)
+    .text(MENU.help)
+    .resized();
+
+const reset = (ctx) => {
+  ctx.session.step = null;
+  ctx.session.tmp = {};
+};
+const cancelKb = () => new InlineKeyboard().text("❌ Bekor qilish", "cancel");
+const me = (ctx) => data().users[ctx.from.id];
+const lookup = (pkgId) => {
+  const pkg = data().packages.find((p) => p.id === Number(pkgId));
+  const game = pkg && data().games.find((g) => g.id === pkg.gameId);
+  return { pkg, game };
+};
+
+// ---------- O'yinlar va paketlar ----------
+async function showGames(ctx) {
+  const games = data().games.filter((g) => g.active);
+  if (!games.length) return show(ctx, "Hozircha o'yinlar mavjud emas.");
+  const kb = new InlineKeyboard();
+  games.forEach((g) => kb.text(`${g.emoji} ${g.name}`, `g:${g.id}`).row());
+  return show(ctx, "🎮 O'yinni tanlang:", kb);
+}
+
+user.callbackQuery("games", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await showGames(ctx);
+});
+
+user.callbackQuery(/^g:(\d+)$/, async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const game = data().games.find((g) => g.id === Number(ctx.match[1]));
+  if (!game || !game.active) return show(ctx, "O'yin topilmadi.");
+  const list = data().packages.filter((p) => p.gameId === game.id && p.active);
+  const kb = new InlineKeyboard();
+  list.forEach((p) => kb.text(`${p.name} — ${fmt(p.price)}`, `p:${p.id}`).row());
+  kb.text("⬅️ Orqaga", "games");
+  const head = `${game.emoji} <b>${esc(game.name)}</b>\n`;
+  await show(ctx, head + (list.length ? "Paketni tanlang:" : "Hozircha paketlar yo'q."), kb);
+});
+
+user.callbackQuery(/^p:(\d+)$/, async (ctx) => {
+  const { pkg, game } = lookup(ctx.match[1]);
+  if (!pkg || !game || !pkg.active || !game.active) {
+    return ctx.answerCallbackQuery({ text: "Bu paket hozir mavjud emas", show_alert: true });
+  }
+  await ctx.answerCallbackQuery();
+  ctx.session.step = "u:id";
+  ctx.session.tmp = { pkgId: pkg.id };
+  await ctx.reply(
+    `${game.emoji} <b>${esc(game.name)}</b> — ${esc(pkg.name)}\n💵 ${fmt(pkg.price)}\n\n🆔 O'yindagi <b>Player ID</b> raqamingizni yuboring:`,
+    { parse_mode: "HTML", reply_markup: cancelKb() }
+  );
+});
+
+user.callbackQuery("cancel", async (ctx) => {
+  reset(ctx);
+  await ctx.answerCallbackQuery({ text: "Bekor qilindi" });
+  await show(ctx, "❌ Bekor qilindi.");
+});
+
+// ---------- ID tekshirish ----------
+async function verifyAccount(ctx) {
+  const s = ctx.session;
+  const { pkg, game } = lookup(s.tmp.pkgId);
+  if (!pkg || !game) {
+    reset(ctx);
+    await ctx.reply("Paket topilmadi, qaytadan boshlang.");
+    return;
+  }
+  await ctx.reply("🔎 ID tekshirilmoqda...");
+  let r;
+  try {
+    r = await provider.checkId(game, s.tmp.playerId, s.tmp.serverId);
+  } catch (e) {
+    console.error("checkId xatosi:", e.message);
+    reset(ctx);
+    await ctx.reply("⚠️ ID tekshirish xizmati vaqtincha ishlamayapti. Birozdan keyin urinib ko'ring.");
+    return;
+  }
+  if (!r.ok) {
+    s.step = "u:id";
+    delete s.tmp.playerId;
+    delete s.tmp.serverId;
+    await ctx.reply("❌ Bunday ID topilmadi. To'g'ri ID yuboring:", { reply_markup: cancelKb() });
+    return;
+  }
+  s.tmp.nickname = r.nickname || "";
+  s.step = "u:confirm";
+
+  const lines = [
+    `${game.emoji} <b>${esc(game.name)}</b> — ${esc(pkg.name)}`,
+    `💵 Narxi: <b>${fmt(pkg.price)}</b>`,
+    `🆔 ID: <code>${esc(s.tmp.playerId)}</code>`,
+  ];
+  if (s.tmp.serverId) lines.push(`🌐 Server: <code>${esc(s.tmp.serverId)}</code>`);
+  if (r.nickname) {
+    lines.push(`👤 Nik: <b>${esc(r.nickname)}</b>`, "", "✅ Akkaunt topildi. Tasdiqlaysizmi?");
+  } else {
+    lines.push(
+      "",
+      "⚠️ ID avtomatik tekshirilmadi. ID to'g'riligini yaxshilab tekshiring — xato ID ga yuborilgan donat qaytarilmaydi."
+    );
+  }
+  const kb = new InlineKeyboard()
+    .text("✅ Tasdiqlash va to'lash", "buy")
+    .row()
+    .text("🔁 ID ni o'zgartirish", `p:${pkg.id}`)
+    .text("❌ Bekor", "cancel");
+  await ctx.reply(lines.join("\n"), { parse_mode: "HTML", reply_markup: kb });
+}
+
+// ---------- Sotib olish ----------
+user.callbackQuery("buy", async (ctx) => {
+  const s = ctx.session;
+  if (s.step !== "u:confirm") {
+    return ctx.answerCallbackQuery({ text: "Sessiya eskirdi, qaytadan boshlang.", show_alert: true });
+  }
+  const { pkg, game } = lookup(s.tmp.pkgId);
+  if (!pkg || !game || !pkg.active || !game.active) {
+    reset(ctx);
+    return ctx.answerCallbackQuery({ text: "Bu paket endi mavjud emas", show_alert: true });
+  }
+  const u = me(ctx);
+  if (u.balance < pkg.price) {
+    await ctx.answerCallbackQuery();
+    const kb = new InlineKeyboard().text("💳 Hisobni to'ldirish", "topup");
+    return show(
+      ctx,
+      `❗️ Balansingiz yetarli emas.\n\nKerak: ${fmt(pkg.price)}\nBalans: ${fmt(u.balance)}\nYetishmaydi: <b>${fmt(pkg.price - u.balance)}</b>`,
+      kb
+    );
+  }
+
+  // Ikki marta bosilishdan himoya: avval holatni tozalab, pulni yechamiz
+  const tmp = s.tmp;
+  reset(ctx);
+  u.balance -= pkg.price;
+  const order = {
+    id: nextId("order"),
+    userId: u.id,
+    gameId: game.id,
+    gameName: game.name,
+    pkgId: pkg.id,
+    pkgName: pkg.name,
+    price: pkg.price,
+    playerId: tmp.playerId,
+    serverId: tmp.serverId || "",
+    nickname: tmp.nickname || "",
+    status: "processing",
+    createdAt: Date.now(),
+  };
+  data().orders.push(order);
+  save();
+
+  await ctx.answerCallbackQuery();
+  await show(ctx, `⏳ Buyurtma #${order.id} qabul qilindi, bajarilmoqda...`);
+  await processOrder(ctx.api, order);
+});
+
+// ---------- Hisob ----------
+async function showBalance(ctx) {
+  const u = me(ctx);
+  const kb = new InlineKeyboard().text("💳 Hisobni to'ldirish", "topup");
+  await show(
+    ctx,
+    `💰 Balansingiz: <b>${fmt(u.balance)}</b>\n🆔 Telegram ID: <code>${u.id}</code>`,
+    kb
+  );
+}
+
+async function showOrders(ctx) {
+  const list = data().orders.filter((o) => o.userId === ctx.from.id).slice(-10).reverse();
+  if (!list.length) return show(ctx, "Sizda hali buyurtmalar yo'q.");
+  const lines = list.map(
+    (o) => `#${o.id} ${esc(o.gameName)} — ${esc(o.pkgName)}\n   ${fmt(o.price)} • ${statusLabel(o.status)}`
+  );
+  await show(ctx, "📦 <b>Oxirgi buyurtmalar:</b>\n\n" + lines.join("\n\n"));
+}
+
+user.callbackQuery("topup", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  ctx.session.step = "u:topamount";
+  ctx.session.tmp = {};
+  await ctx.reply(
+    `💳 Qancha summaga to'ldirmoqchisiz?\nMinimal: ${fmt(data().settings.minTopup)}\n\nSummani raqam bilan yozing (masalan: 50000):`,
+    { reply_markup: cancelKb() }
+  );
+});
+
+// ---------- Matnli xabarlar ----------
+async function handleText(ctx) {
+  const t = ctx.message.text.trim();
+  const s = ctx.session;
+  const st = data().settings;
+
+  if (t === MENU.shop) { reset(ctx); await showGames(ctx); return true; }
+  if (t === MENU.bal) { reset(ctx); await showBalance(ctx); return true; }
+  if (t === MENU.orders) { reset(ctx); await showOrders(ctx); return true; }
+  if (t === MENU.help) {
+    reset(ctx);
+    await ctx.reply(`☎️ Aloqa: ${esc(st.contact)}`, { parse_mode: "HTML" });
+    return true;
+  }
+
+  switch (s.step) {
+    case "u:id": {
+      if (!/^\d{5,15}$/.test(t)) {
+        await ctx.reply("❗️ ID faqat raqamlardan iborat bo'lishi kerak (5–15 ta raqam). Qayta yuboring:");
+        return true;
+      }
+      const { game } = lookup(s.tmp.pkgId);
+      if (!game) { reset(ctx); await ctx.reply("Paket topilmadi."); return true; }
+      s.tmp.playerId = t;
+      if (game.needsServer) {
+        s.step = "u:server";
+        await ctx.reply("🌐 Endi <b>Server (Zone) ID</b> ni yuboring (masalan: 2001):", {
+          parse_mode: "HTML",
+          reply_markup: cancelKb(),
+        });
+      } else {
+        await verifyAccount(ctx);
+      }
+      return true;
+    }
+    case "u:server": {
+      if (!/^\d{1,7}$/.test(t)) {
+        await ctx.reply("❗️ Server ID faqat raqamlardan iborat bo'lishi kerak. Qayta yuboring:");
+        return true;
+      }
+      s.tmp.serverId = t;
+      await verifyAccount(ctx);
+      return true;
+    }
+    case "u:topamount": {
+      const n = parseInt(t.replace(/[\s,._]/g, ""), 10);
+      if (!Number.isFinite(n) || n < st.minTopup || n > 50000000) {
+        await ctx.reply(`❗️ Summa ${fmt(st.minTopup)} dan 50 000 000 gacha bo'lishi kerak. Qayta yuboring:`);
+        return true;
+      }
+      s.tmp.amount = n;
+      s.step = "u:receipt";
+      await ctx.reply(
+        `💳 <b>To'lov ma'lumotlari</b>\n\nKarta: <code>${esc(st.cardNumber)}</code>\nEgasi: ${esc(st.cardOwner)}\nSumma: <b>${fmt(n)}</b>\n\nTo'lovni amalga oshirib, <b>chek (skrinshot) rasmini</b> shu yerga yuboring.`,
+        { parse_mode: "HTML", reply_markup: cancelKb() }
+      );
+      return true;
+    }
+    case "u:receipt":
+      await ctx.reply("📷 Iltimos, to'lov chekini rasm (skrinshot) ko'rinishida yuboring.");
+      return true;
+    default:
+      return false;
+  }
+}
+
+// ---------- Chek rasmi ----------
+user.on("message:photo", async (ctx) => {
+  const s = ctx.session;
+  if (s.step !== "u:receipt") return;
+  const u = me(ctx);
+  const photo = ctx.message.photo[ctx.message.photo.length - 1];
+  const t = {
+    id: nextId("topup"),
+    userId: u.id,
+    amount: s.tmp.amount,
+    fileId: photo.file_id,
+    status: "pending",
+    createdAt: Date.now(),
+  };
+  data().topups.push(t);
+  save();
+  reset(ctx);
+
+  await ctx.reply(`✅ Chek yuborildi (#${t.id}). Admin tekshirib, hisobingizni to'ldiradi.`);
+
+  const caption = `💳 To'lov #${t.id}\n👤 ${u.name} ${u.username ? "@" + u.username : ""} (ID: ${u.id})\n💵 ${fmt(t.amount)}`;
+  const kb = new InlineKeyboard().text("✅ Tasdiqlash", `a:ta:${t.id}`).text("❌ Rad etish", `a:tr:${t.id}`);
+  for (const id of adminIds) {
+    try {
+      await ctx.api.sendPhoto(id, t.fileId, { caption, reply_markup: kb });
+    } catch (e) {
+      console.error("Chek adminga yuborilmadi:", id, e.description || e.message);
+    }
+  }
+});
+
+module.exports = { user, handleText, mainKb, reset };

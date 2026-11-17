@@ -1,0 +1,16 @@
+{
+  "name": "donat-bot",
+  "version": "1.0.0",
+  "description": "Telegram donat bot: PUBG, Free Fire, Mobile Legends, Standoff 2 (admin panel bilan)",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "grammy": "^1.30.0"
+  }
+}
