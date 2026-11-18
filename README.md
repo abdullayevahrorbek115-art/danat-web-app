@@ -75,3 +75,31 @@ Panel → 🔘 Tugmalar → «➕ Funksiyali tugma». Nomini yozing, so'ng funks
 
 ## 👤 ID tekshirishda nik
 Nik faqat provayder API si orqali olinadi (rejim `api`, o'yinda provayder kodi bor). Nik chiqmasa: 🔌 Provayder → 🧪 Sinash bilan xom javobni ko'ring va «Javobdagi nik yo'li» ni shunga moslang. Bot endi yo'l noto'g'ri bo'lsa ham `nickname`, `name`, `username` kabi keng tarqalgan nomlarni o'zi qidiradi.
+
+## 💳 Avtomatik to'lov (Click va Payme)
+Panel → 💳 To'lov tizimlari (faqat bosh adminlar). Mijoz summani yozadi, usulni tanlaydi (Click / Payme / kartaga chek), to'lov havolasi chiqadi. To'lov o'tgach tizim botingizning serveriga so'rov (webhook) yuboradi va balans **o'zi** to'ldiriladi — admin tasdiqlashi shart emas. Do'st taklif bonusi ham avtomatik beriladi. Kartaga o'tkazish (chek) usuli xohlasangiz qoladi, xohlasangiz panelda o'chirib qo'yasiz.
+
+**Sozlash:**
+1. Botni ochiq manzilli serverga joylang (Render/VPS) va `.env` ga `PUBLIC_URL=https://sizning-domen` yozing.
+2. Panel → 💳 To'lov tizimlari → Click yoki Payme → ma'lumotlarni kiriting → ✅ Yoqish.
+3. Tizim sahifasida ko'rsatilgan manzilni to'lov tizimi kabinetiga kiriting:
+   - **Click**: Prepare URL va Complete URL ikkalasiga ham `PUBLIC_URL/click` (Service ID, Merchant ID, Secret key — Click kabinetidan).
+   - **Payme**: Endpoint URL — `PUBLIC_URL/payme`; kassada hisob maydoni nomi aynan `order_id` bo'lsin; Merchant ID va KEY — Payme kabinetidan (avval test kassa kaliti bilan sinab ko'ring).
+4. Kichik summa bilan sinab ko'ring.
+
+Server `PORT` (bo'sh bo'lsa 3000) da ishlaydi; `https` ni hosting yoki nginx beradi. Barcha to'lovlar `data/db.json` ichida (`payments`, `paymeTx`).
+
+## 📂 Ichki menyu tugmalari
+Panel → 🔘 Tugmalar → «➕ Ichki menyu». Menyu yaratgach, uni ochib ichiga tugma qo'shasiz: 📝 matnli, 🔗 havolali, ⚙️ funksiyali yoki yana 📂 ichki menyu (masalan «💳 To'lov» → Click, Payme, Karta, Promo kod). Funksiyalar ro'yxatiga yangi: «🟦 Click orqali to'ldirish», «🟩 Payme orqali to'ldirish», «🏦 Kartaga o'tkazib to'ldirish». Asosiy menyuda 12 tagacha, har bir ichki menyuda 20 tagacha tugma bo'ladi.
+
+## 🏦 Kartaga o'tkazish (avto, noyob summa, 5 daqiqa)
+Panel → 💳 To'lov tizimlari → «🏦 Karta (avto, noyob summa)». Karta raqami — Sozlamalar → «Karta raqami».
+- Mijoz summa yozadi, bot unga **noyob summa** beradi (masalan 50 000 → 50 013) va muddat (standart 5 daqiqa, panelda o'zgaradi).
+- Kartangizga shu summa tushgani haqidagi xabar `PUBLIC_URL/card?secret=KALIT` manziliga (POST) kelsa, balans **avtomatik** to'ldiriladi. Muddat tugagan yoki summa mos kelmasa — avtomatik to'ldirilmaydi; muddati yaqinda tugagan to'lovga pul tushgan bo'lsa, adminga xabar boradi (qo'lda to'ldirasiz).
+- Xabar formati: JSON `{"amount": 50013}` (ixtiyoriy `"id"` — takrorlanishdan himoya) yoki bank SMS matni (`{"text": "..."}` yoki oddiy matn). Kirimni kuzatuvchi xizmat yoki telefondagi SMS/bildirishnoma yuboruvchi ilova shu manzilga yuboradi. Faqat **kirim** xabarlarini yuboring.
+- Kalitni kimgadir bildirib qo'ysangiz, panelda «Yangi maxfiy kalit» ni bosing va manzilni yangilang.
+
+## 💰 Moliya hisoboti
+Panel → 💰 Hisobot: bugun, kecha, oxirgi 7 kun, shu oy va umumiy **kirim** (hisob to'ldirishlar: Click, Payme, karta, chek), **savdo** (buyurtmalarga sarflangan pul), mijozlar balansida turgan pul. «Kunlar bo'yicha» (31 kun) va «Oylar bo'yicha» (12 oy) tugmalari ham bor.
+- **Foyda**: paket menyusida «💰 Tannarx» ni kiriting (siz provayderga qancha to'laysiz) — hisobotda tannarx va foyda chiqadi. Tannarx faqat keyingi buyurtmalar uchun hisoblanadi.
+- **Kunlik avto-hisobot**: har kuni 23:55 da adminlarga yuboriladi (panelda o'chirib qo'yish mumkin). Vaqt mintaqasi: `.env` da `TIMEZONE` (standart Asia/Tashkent).

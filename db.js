@@ -21,6 +21,7 @@ const defaults = () => ({
     refBonus: 0, // taklif qilgan foydalanuvchiga bonus (so'm), 0 = o'chiq
     requiredChannels: [], // majburiy obuna kanallari (@username)
     ordersChat: "", // buyurtma xabarlari boradigan guruh/kanal (ID yoki @username)
+    pay: {}, // avtomatik to'lov tizimlari (panel → To'lov tizimlari): click, payme, card
   },
   games: [
     { id: 1, name: "PUBG Mobile", emoji: "🔫", needsServer: false, active: true, providerCode: "" },
@@ -32,8 +33,10 @@ const defaults = () => ({
   users: {}, // { id, name, username, balance, joined }
   orders: [],
   topups: [],
+  payments: [], // avto-to'lovlar { id, userId, amount, method, status }
+  paymeTx: [], // Payme tranzaksiyalari
   promos: [], // { code, amount, maxUses, usedBy: [], active }
-  seq: { game: 4, pkg: 0, order: 0, topup: 0 },
+  seq: { game: 4, pkg: 0, order: 0, topup: 0, pay: 0, btn: 0 },
 });
 
 function load() {

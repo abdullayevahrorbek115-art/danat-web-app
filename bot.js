@@ -114,9 +114,7 @@ bot.catch((err) => console.error("Bot xatosi:", err.error || err));
 
 bot.start({ onStart: (me) => console.log(`✅ @${me.username} ishga tushdi`) });
 
-// Render kabi hostinglar "Web Service" uchun ochiq port talab qiladi
-if (process.env.PORT) {
-  require("http")
-    .createServer((req, res) => { res.writeHead(200); res.end("OK"); })
-    .listen(process.env.PORT, () => console.log("HTTP port: " + process.env.PORT));
-}
+// HTTP server: hosting health-check (Render va h.k.) + to'lov tizimlari webhooklari (Click/Payme)
+require("./payments").startServer(() => bot.api);
+// Kunlik moliyaviy hisobot (har kuni 23:55 da adminlarga)
+require("./report").startReports(() => bot.api);

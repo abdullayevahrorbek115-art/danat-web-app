@@ -4,6 +4,8 @@ const { data, save, nextId } = require("./db");
 const { isAdmin, isMainAdmin, adminIds, allAdmins } = require("./config");
 const { esc, fmt, show, sleep, MENU } = require("./util");
 const provider = require("./provider");
+const payments = require("./payments");
+const report = require("./report");
 const { mainKb } = require("./user");
 const {
   completeOrder,
@@ -53,7 +55,10 @@ const panelKb = () =>
     .text("👮 Adminlar", "a:admins")
     .row()
     .text("🔌 Provayder", "a:prov")
-    .text("🔘 Tugmalar", "a:btns");
+    .text("🔘 Tugmalar", "a:btns")
+    .row()
+    .text("💳 To'lov tizimlari", "a:pay")
+    .text("💰 Hisobot", "a:rep");
 
 async function panel(ctx) {
   reset(ctx);
@@ -199,12 +204,14 @@ async function pkgMenu(ctx, id) {
   const text =
     `📦 <b>${esc(p.name)}</b>\n🎮 ${esc(g ? g.name : "?")}\n💵 Narx: <b>${fmt(p.price)}</b>\n` +
     `Holat: ${p.active ? "✅ yoqilgan" : "🚫 o'chirilgan"}\n` +
-    `Provayder SKU: ${p.sku ? "<code>" + esc(p.sku) + "</code>" : "—"}`;
+    `Provayder SKU: ${p.sku ? "<code>" + esc(p.sku) + "</code>" : "—"}\n` +
+    `Tannarx: ${p.cost ? fmt(p.cost) : "—"} <i>(hisobotda foyda hisoblash uchun)</i>`;
   const kb = new InlineKeyboard()
     .text("✏️ Nomi", `a:pe:${p.id}`)
     .text("💵 Narxi", `a:pp:${p.id}`)
     .row()
     .text("🔑 Provayder SKU", `a:pk:${p.id}`)
+    .text("💰 Tannarx", `a:pco:${p.id}`)
     .row()
     .text(p.active ? "🚫 O'chirib qo'yish" : "✅ Yoqish", `a:pt:${p.id}`)
     .row()
@@ -223,6 +230,9 @@ adm.callbackQuery(/^a:pe:(\d+)$/, (ctx) => ask(ctx, "adm:pedit", { id: ctx.match
 adm.callbackQuery(/^a:pp:(\d+)$/, (ctx) => ask(ctx, "adm:pnewprice", { id: ctx.match[1] }, "💵 Yangi narxni yuboring (so'mda, faqat raqam):"));
 adm.callbackQuery(/^a:pk:(\d+)$/, (ctx) =>
   ask(ctx, "adm:psku", { id: ctx.match[1] }, "🔑 Provayderdagi paket kodini (SKU) yuboring (o'chirish uchun <code>-</code>):")
+);
+adm.callbackQuery(/^a:pco:(\d+)$/, (ctx) =>
+  ask(ctx, "adm:pcost", { id: ctx.match[1] }, "💰 Paketning tannarxini yuboring (so'mda — siz qancha to'laysiz). Olib tashlash uchun <code>0</code>:")
 );
 adm.callbackQuery(/^a:pt:(\d+)$/, async (ctx) => {
   const p = findPkg(ctx.match[1]);
@@ -320,19 +330,14 @@ adm.callbackQuery(/^a:ta:(\d+)$/, async (ctx) => {
   }
   const u = data().users[t.userId];
   t.status = "approved";
+  t.approvedAt = Date.now();
   t.by = ctx.from.id;
-  if (u) u.balance += t.amount;
   // Do'st taklif bonusi: taklif qilingan foydalanuvchining birinchi tasdiqlangan to'ldirishi uchun
-  const bonus = data().settings.refBonus;
-  const inviter = u && u.refBy && !u.refPaid ? data().users[u.refBy] : null;
-  if (u && inviter && bonus > 0) {
-    u.refPaid = true;
-    inviter.balance += bonus;
-  }
+  const { inviter, bonus } = u ? payments.grantBalance(u, t.amount) : { inviter: null, bonus: 0 };
   save();
   await ctx.answerCallbackQuery({ text: "Tasdiqlandi" });
   await markDone(ctx, `\n\n✅ Tasdiqlandi (${ctx.from.first_name})`);
-  if (u && inviter && bonus > 0) {
+  if (inviter) {
     await safeSend(
       ctx.api,
       inviter.id,
@@ -691,14 +696,154 @@ adm.callbackQuery("a:pt", async (ctx) => {
   );
 });
 
+// ---------- To'lov tizimlari (faqat bosh adminlar) ----------
+const maskSecret = (v) => (v ? "••••" + String(v).slice(-4) : "—");
+
+async function paySysScreen(ctx) {
+  const c = payments.pcfg();
+  const state = (sys) => {
+    if (!c[sys].enabled) return "🚫 o'chiq";
+    return payments.isReady(sys) ? "✅ ishlayapti" : "⚠️ sozlanmagan";
+  };
+  const kb = new InlineKeyboard();
+  for (const [id, sys] of Object.entries(payments.SYSTEMS)) kb.text(`${sys.icon} ${sys.label}: ${state(id)}`, `a:ps:${id}`).row();
+  kb.text(c.card.auto ? "🏦 Karta (avto, noyob summa): ✅" : "🏦 Karta (avto, noyob summa): 🚫", "a:pcard").row();
+  kb.text(c.card.enabled !== false ? "💳 Kartaga o'tkazish (chek): ✅" : "💳 Kartaga o'tkazish (chek): 🚫", "a:psc").row();
+  kb.text("⬅️ Orqaga", "a:home");
+  await show(
+    ctx,
+    "💳 <b>To'lov tizimlari</b>\n\nAvtomatik tizimlarda mijoz to'lagach balans <b>o'zi</b> to'ldiriladi (admin tasdiqlashi shart emas).\n\n" +
+      `🟦 Click: ${state("click")}\n🟩 Payme: ${state("payme")}\n💳 Kartaga o'tkazish (chek, admin tasdiqlaydi): ${c.card.enabled !== false ? "✅ yoqilgan" : "🚫 o'chiq"}\n\n` +
+      "Tizimni tanlab, ma'lumotlarini kiriting va yoqing. Server manzili (webhook) kerak bo'ladi — u tizim sahifasida ko'rsatilgan.",
+    kb
+  );
+}
+
+async function paySysMenu(ctx, sys) {
+  const S = payments.SYSTEMS[sys];
+  if (!S) return paySysScreen(ctx);
+  const c = payments.pcfg()[sys];
+  const base = payments.baseUrl();
+  const lines = Object.entries(S.fields).map(([k, label]) => `${label}: <code>${S.secret.includes(k) ? maskSecret(c[k]) : esc(c[k] || "—")}</code>`);
+  const hook =
+    sys === "click"
+      ? `Click kabinetida (Prepare URL va Complete URL ikkalasiga ham):\n<code>${esc(base)}/click</code>`
+      : `Payme kabinetida «Endpoint URL»:\n<code>${esc(base)}/payme</code>\nKassadagi hisob maydoni nomi: <code>order_id</code>`;
+  const kb = new InlineKeyboard();
+  kb.text(c.enabled ? "🚫 O'chirish" : "✅ Yoqish", `a:pst:${sys}`).row();
+  Object.entries(S.fields).forEach(([k, label]) => kb.text(`✏️ ${label}`, `a:psf:${sys}:${k}`).row());
+  kb.text("⬅️ Orqaga", "a:pay");
+  await show(
+    ctx,
+    `${S.icon} <b>${S.label}</b> — ${c.enabled ? "✅ yoqilgan" : "🚫 o'chiq"}\n\n${lines.join("\n")}\n\n${hook}\n\n` +
+      (process.env.PUBLIC_URL ? "" : "⚠️ <i>.env ga PUBLIC_URL (botingiz serveri manzili) yozilmagan — yuqoridagi SIZNING-DOMEN o'rniga haqiqiy manzilingizni qo'ying.</i>\n\n") +
+      "<i>Kalit va ma'lumotlarni faqat o'zingiz ko'rasiz. Kiritilgan xabaringiz xavfsizlik uchun o'chiriladi.</i>",
+    kb
+  );
+}
+
+adm.callbackQuery("a:pay", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  await ctx.answerCallbackQuery();
+  await paySysScreen(ctx);
+});
+adm.callbackQuery(/^a:ps:(click|payme)$/, async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  await ctx.answerCallbackQuery();
+  await paySysMenu(ctx, ctx.match[1]);
+});
+async function cardAutoScreen(ctx) {
+  const c = payments.pcfg().card;
+  const base = payments.baseUrl();
+  const sec = payments.cardSecret();
+  const kb = new InlineKeyboard()
+    .text(c.auto ? "🚫 O'chirish" : "✅ Yoqish", "a:pcardt")
+    .row()
+    .text("⏱ Muddat (daqiqa)", "a:pcardm")
+    .row()
+    .text("🔑 Yangi maxfiy kalit", "a:pcards")
+    .row()
+    .text("⬅️ Orqaga", "a:pay");
+  await show(
+    ctx,
+    `🏦 <b>Karta (avto, noyob summa)</b> — ${c.auto ? "✅ yoqilgan" : "🚫 o'chiq"}\n\n` +
+      `Karta: <code>${esc(data().settings.cardNumber)}</code> (Sozlamalar → Karta raqami)\nMuddat: <b>${c.timeoutMin} daqiqa</b>\n\n` +
+      "Mijozga summa + 1–99 so'm (noyob) beriladi. Kartangizga shu summa tushgani haqida xabar quyidagi manzilga kelsa, balans avtomatik to'ldiriladi.\n\n" +
+      `📮 Kirim xabari manzili (POST):\n<code>${esc(base)}/card?secret=${sec}</code>\n\n` +
+      "Xabar tarkibi: JSON <code>{\"amount\": 50013}</code> yoki bank SMS matni (<code>{\"text\": \"...\"}</code> yoki oddiy matn). Telefondagi SMS/bildirishnoma yuboruvchi ilova yoki kirimni kuzatuvchi xizmat shu manzilga yuboradi. Faqat KIRIM xabarlarini yuboring.\n\n" +
+      "<i>Kalitni hech kimga bermang.</i>",
+    kb
+  );
+}
+adm.callbackQuery("a:pcard", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  await ctx.answerCallbackQuery();
+  await cardAutoScreen(ctx);
+});
+adm.callbackQuery("a:pcardt", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const c = payments.pcfg().card;
+  payments.pset("card", "auto", !c.auto);
+  await ctx.answerCallbackQuery({ text: c.auto ? "O'chirildi" : "Yoqildi" });
+  await cardAutoScreen(ctx);
+});
+adm.callbackQuery("a:pcards", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  payments.pset("card", "secret", "");
+  await ctx.answerCallbackQuery({ text: "Yangi kalit yaratildi. Manzilni yangilang!", show_alert: true });
+  await cardAutoScreen(ctx);
+});
+adm.callbackQuery("a:pcardm", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  await ask(ctx, "adm:cardmin", {}, "⏱ Mijoz necha daqiqa ichida o'tkazishi kerak? (1–60, masalan 5):");
+});
+adm.callbackQuery("a:psc", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const c = payments.pcfg();
+  payments.pset("card", "enabled", c.card.enabled === false);
+  await ctx.answerCallbackQuery({ text: c.card.enabled === false ? "Yoqildi" : "O'chirildi" });
+  await paySysScreen(ctx);
+});
+adm.callbackQuery(/^a:pst:(click|payme)$/, async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const sys = ctx.match[1];
+  const c = payments.pcfg()[sys];
+  if (!c.enabled) {
+    const miss = payments.missingFields(sys);
+    if (miss.length) {
+      return ctx.answerCallbackQuery({
+        text: "Avval to'ldiring: " + miss.map((k) => payments.SYSTEMS[sys].fields[k]).join(", "),
+        show_alert: true,
+      });
+    }
+  }
+  payments.pset(sys, "enabled", !c.enabled);
+  await ctx.answerCallbackQuery({ text: c.enabled ? "O'chirildi" : "Yoqildi" });
+  await paySysMenu(ctx, sys);
+});
+adm.callbackQuery(/^a:psf:(click|payme):(\w+)$/, async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const [, sys, key] = ctx.match;
+  const label = payments.SYSTEMS[sys].fields[key];
+  if (!label) return ctx.answerCallbackQuery();
+  await ask(ctx, "adm:payf", { sys, key }, `✏️ <b>${esc(label)}</b>\n\nYangi qiymatni yuboring (kabinetdan nusxa oling, bo'sh joysiz):`);
+});
+
 // ---------- Maxsus menyu tugmalari ----------
-const MAX_BUTTONS = 12;
-const BTN_ICON = { text: "📝", link: "🔗", func: "⚙️" };
+// Tugma turlari: text, link, func, menu (ichida boshqa tugmalar bor ichki menyu).
+// Har bir tugmada parent (ota menyu id si, 0 = asosiy menyu) bor.
+const MAX_BUTTONS = 12; // asosiy menyuda
+const MAX_SUB = 20; // bitta ichki menyuda
+const BTN_ICON = { text: "📝", link: "🔗", func: "⚙️", menu: "📂" };
 const FUNCS = {
   shop: "🎮 Donat olish (o'yinlar ro'yxati)",
   bal: "💰 Hisobim",
   orders: "📦 Buyurtmalarim",
-  topup: "💳 Hisobni to'ldirish",
+  topup: "💳 Hisobni to'ldirish (usulni mijoz tanlaydi)",
+  pay_click: "🟦 Click orqali to'ldirish",
+  pay_payme: "🟩 Payme orqali to'ldirish",
+  pay_card: "🏦 Kartaga o'tkazib to'ldirish (chek)",
+  pay_cardauto: "⏱ Kartaga o'tkazish (avto, noyob summa)",
   promo: "🎁 Promo kod",
   ref: "👥 Do'st taklif qilish",
   help: "☎️ Aloqa",
@@ -712,22 +857,34 @@ const funcName = (fn) => {
 
 function normContent(type, t) {
   const x = String(t).trim();
+  if (type === "menu") return x === "-" ? "" : x.length <= 500 ? x : null;
   if (type === "text") return x.length >= 1 && x.length <= 3000 ? x : null;
   if (/^@[A-Za-z0-9_]{5,}$/.test(x)) return "https://t.me/" + x.slice(1);
   return /^https?:\/\/\S+$/i.test(x) ? x : null;
 }
-const findBtn = (id) => (data().settings.buttons || []).find((b) => b.id === Number(id));
+const allBtns = () => data().settings.buttons || [];
+const findBtn = (id) => allBtns().find((b) => b.id === Number(id));
+const childBtns = (parent) => allBtns().filter((b) => (b.parent || 0) === Number(parent || 0));
+function descendantIds(id) {
+  const out = [Number(id)];
+  for (let i = 0; i < out.length; i++) childBtns(out[i]).forEach((c) => out.push(c.id));
+  return out;
+}
+const btnBack = (parent) => (parent ? `a:btd:${parent}` : "a:btns");
+
+function addButtons(kb, parent) {
+  kb.text("➕ Matnli", `a:btnew:text:${parent}`).text("➕ Havolali", `a:btnew:link:${parent}`).row();
+  kb.text("➕ Funksiyali", `a:btnew:func:${parent}`).text("➕ Ichki menyu", `a:btnew:menu:${parent}`).row();
+}
 
 async function btnScreen(ctx) {
-  const list = data().settings.buttons || [];
   const kb = new InlineKeyboard();
-  list.forEach((b) => kb.text(`${BTN_ICON[b.type] || "📝"} ${b.label}`, `a:btd:${b.id}`).row());
-  kb.text("➕ Matnli tugma", "a:btnew:text").text("➕ Havolali tugma", "a:btnew:link").row();
-  kb.text("➕ Funksiyali tugma", "a:btnew:func").row();
+  childBtns(0).forEach((b) => kb.text(`${BTN_ICON[b.type] || "📝"} ${b.label}`, `a:btd:${b.id}`).row());
+  addButtons(kb, 0);
   kb.text("⬅️ Orqaga", "a:home");
   await show(
     ctx,
-    "🔘 <b>Menyu tugmalari</b>\n📝 Matnli — bosilganda botdan xabar chiqadi (qoidalar, narxlar, aloqa...).\n🔗 Havolali — bosilganda havola tugmasi chiqadi (kanal, sayt...).\n⚙️ Funksiyali — bosilganda bot funksiyasi ishlaydi (masalan «⭐ Stars» → Stars paketlari ro'yxati).\n\nTugmalar foydalanuvchi menyusiga qo'shiladi. Foydalanuvchilarda yangi tugmalar /start bosganda yoki «Xabar yuborish» dan keyin paydo bo'ladi.",
+    "🔘 <b>Menyu tugmalari</b>\n📝 Matnli — bosilganda botdan xabar chiqadi (qoidalar, narxlar...).\n🔗 Havolali — bosilganda havola tugmasi chiqadi (kanal, sayt...).\n⚙️ Funksiyali — bot funksiyasi ishlaydi (hisobni to'ldirish, Click/Payme, aniq bir o'yin bo'limi...).\n📂 Ichki menyu — bosilganda ichida yana tugmalar chiqadi (masalan «💳 To'lov» → Click, Payme, Karta). Ichiga matnli, havolali, funksiyali va yana ichki menyu qo'shish mumkin.\n\nTugmalar foydalanuvchi menyusiga /start bosganda yoki «Xabar yuborish» dan keyin paydo bo'ladi.",
     kb
   );
 }
@@ -736,28 +893,36 @@ async function btnMenu(ctx, id) {
   const b = findBtn(id);
   if (!b) return btnScreen(ctx);
   const kb = new InlineKeyboard().text("✏️ Nomi", `a:btl:${b.id}`);
-  if (b.type !== "func") kb.text(b.type === "link" ? "✏️ Havola" : "✏️ Matn", `a:btc:${b.id}`);
-  kb.row()
-    .text("🗑 O'chirish", `a:btx:${b.id}`)
-    .row()
-    .text("⬅️ Orqaga", "a:btns");
-  const content = b.content.length > 300 ? b.content.slice(0, 300) + "…" : b.content;
-  await show(
-    ctx,
-    `🔘 <b>${esc(b.label)}</b>\nTuri: ${b.type === "link" ? "🔗 havolali" : b.type === "func" ? "⚙️ funksiyali" : "📝 matnli"}\n\n${b.type === "func" ? esc(funcName(b.content)) : esc(content)}`,
-    kb
-  );
+  if (b.type === "menu") kb.text("✏️ Tavsif", `a:btc:${b.id}`);
+  else if (b.type !== "func") kb.text(b.type === "link" ? "✏️ Havola" : "✏️ Matn", `a:btc:${b.id}`);
+  kb.row();
+  if (b.type === "menu") {
+    childBtns(b.id).forEach((c) => kb.text(`${BTN_ICON[c.type] || "📝"} ${c.label}`, `a:btd:${c.id}`).row());
+    addButtons(kb, b.id);
+  }
+  kb.text("🗑 O'chirish", `a:btx:${b.id}`).row().text("⬅️ Orqaga", btnBack(b.parent));
+  const content = String(b.content || "");
+  const short = content.length > 300 ? content.slice(0, 300) + "…" : content;
+  let body;
+  if (b.type === "func") body = esc(funcName(b.content));
+  else if (b.type === "menu") body = `Ichidagi tugmalar: ${childBtns(b.id).length} ta` + (short ? `\nTavsif: ${esc(short)}` : "");
+  else body = esc(short);
+  const typeName = { link: "🔗 havolali", func: "⚙️ funksiyali", menu: "📂 ichki menyu", text: "📝 matnli" }[b.type] || "📝 matnli";
+  await show(ctx, `🔘 <b>${esc(b.label)}</b>\nTuri: ${typeName}\n\n${body}`, kb);
 }
 
 adm.callbackQuery("a:btns", async (ctx) => { await ctx.answerCallbackQuery(); await btnScreen(ctx); });
-adm.callbackQuery(/^a:btnew:(text|link|func)$/, async (ctx) => {
-  if ((data().settings.buttons || []).length >= MAX_BUTTONS) {
-    return ctx.answerCallbackQuery({ text: `Eng ko'pi bilan ${MAX_BUTTONS} ta tugma qo'shish mumkin`, show_alert: true });
+adm.callbackQuery(/^a:btnew:(text|link|func|menu):(\d+)$/, async (ctx) => {
+  const parent = Number(ctx.match[2]);
+  if (parent && !findBtn(parent)) return ctx.answerCallbackQuery({ text: "Menyu topilmadi", show_alert: true });
+  const limit = parent ? MAX_SUB : MAX_BUTTONS;
+  if (childBtns(parent).length >= limit) {
+    return ctx.answerCallbackQuery({ text: `Bu yerga eng ko'pi bilan ${limit} ta tugma qo'shish mumkin`, show_alert: true });
   }
   await ask(
     ctx,
     "adm:btlabel",
-    { type: ctx.match[1] },
+    { type: ctx.match[1], parent },
     "🔘 Tugma nomini yuboring (30 belgigacha, emoji bilan chiroyli ko'rinadi), masalan: <code>📜 Qoidalar</code>"
   );
 });
@@ -774,9 +939,9 @@ adm.callbackQuery(/^a:bfg:(\d+)$/, async (ctx) => {
   await finishFuncBtn(ctx, "game:" + ctx.match[1]);
 });
 async function finishFuncBtn(ctx, fn) {
-  const label = ctx.session.tmp.label;
+  const { label, parent } = ctx.session.tmp;
   const id = nextId("btn");
-  data().settings.buttons.push({ id, label, type: "func", content: fn });
+  data().settings.buttons.push({ id, label, type: "func", content: fn, parent: parent || 0 });
   save();
   reset(ctx);
   await ctx.answerCallbackQuery({ text: "✅ Qo'shildi" });
@@ -791,14 +956,49 @@ adm.callbackQuery(/^a:btc:(\d+)$/, async (ctx) => {
     ctx,
     "adm:btecontent",
     { id: ctx.match[1] },
-    b.type === "link" ? "🔗 Yangi havolani yuboring (https://... yoki @kanal):" : "📝 Tugma bosilganda chiqadigan yangi matnni yuboring:"
+    b.type === "link"
+      ? "🔗 Yangi havolani yuboring (https://... yoki @kanal):"
+      : b.type === "menu"
+      ? "✏️ Menyu ochilganda ko'rinadigan tavsifni yuboring (500 belgigacha). Tavsifni olib tashlash uchun <code>-</code> yuboring:"
+      : "📝 Tugma bosilganda chiqadigan yangi matnni yuboring:"
   );
 });
 adm.callbackQuery(/^a:btx:(\d+)$/, async (ctx) => {
-  data().settings.buttons = (data().settings.buttons || []).filter((b) => b.id !== Number(ctx.match[1]));
+  const b = findBtn(ctx.match[1]);
+  const ids = b ? descendantIds(b.id) : [];
+  data().settings.buttons = allBtns().filter((x) => !ids.includes(x.id));
   save();
   await ctx.answerCallbackQuery({ text: "O'chirildi" });
-  await btnScreen(ctx);
+  if (b && b.parent && findBtn(b.parent)) await btnMenu(ctx, b.parent);
+  else await btnScreen(ctx);
+});
+
+// ---------- Moliya hisoboti ----------
+const repKb = () => {
+  const on = data().settings.dailyReport !== false;
+  return new InlineKeyboard()
+    .text("📅 Kunlar bo'yicha", "a:repd")
+    .text("📆 Oylar bo'yicha", "a:repm")
+    .row()
+    .text(on ? "🔔 Kunlik hisobot (23:55): yoqilgan" : "🔕 Kunlik hisobot: o'chiq", "a:rept")
+    .row()
+    .text("⬅️ Orqaga", "a:home");
+};
+adm.callbackQuery("a:rep", async (ctx) => { await ctx.answerCallbackQuery(); await show(ctx, report.overview(), repKb()); });
+adm.callbackQuery("a:repd", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await show(ctx, report.daily(), new InlineKeyboard().text("⬅️ Hisobot", "a:rep"));
+});
+adm.callbackQuery("a:repm", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await show(ctx, report.monthly(), new InlineKeyboard().text("⬅️ Hisobot", "a:rep"));
+});
+adm.callbackQuery("a:rept", async (ctx) => {
+  const st = data().settings;
+  st.dailyReport = st.dailyReport === false;
+  save();
+  await ctx.answerCallbackQuery({ text: st.dailyReport ? "Yoqildi" : "O'chirildi" });
+  await show(ctx, report.overview(), repKb());
 });
 
 // ---------- Statistika ----------
@@ -889,6 +1089,15 @@ async function adminText(ctx) {
       }
       const p = findPkg(tmp.id);
       if (p) { p.price = price; save(); }
+      reset(ctx);
+      await pkgMenu(ctx, tmp.id);
+      return true;
+    }
+    case "adm:pcost": {
+      const n = parseNum(t);
+      if (!Number.isFinite(n) || n < 0) { await ctx.reply("❗️ 0 yoki musbat raqam yuboring:"); return true; }
+      const p = findPkg(tmp.id);
+      if (p) { p.cost = n; save(); }
       reset(ctx);
       await pkgMenu(ctx, tmp.id);
       return true;
@@ -1073,6 +1282,30 @@ async function adminText(ctx) {
       await provScreen(ctx, group);
       return true;
     }
+    case "adm:cardmin": {
+      if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
+      const n = parseNum(t);
+      if (!Number.isFinite(n) || n < 1 || n > 60) { await ctx.reply("❗️ 1 dan 60 gacha raqam yuboring:"); return true; }
+      payments.pset("card", "timeoutMin", n);
+      reset(ctx);
+      await ctx.reply("✅ Saqlandi.");
+      await cardAutoScreen(ctx);
+      return true;
+    }
+    case "adm:payf": {
+      if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
+      const v = t.replace(/\s+/g, "");
+      try { await ctx.api.deleteMessage(ctx.chat.id, ctx.message.message_id); } catch (e) { /* ruxsat yo'q bo'lishi mumkin */ }
+      if (!v || v.length > 200) {
+        await ctx.reply("❗️ Qiymat bo'sh bo'lmasligi va juda uzun bo'lmasligi kerak. Qayta yuboring:");
+        return true;
+      }
+      payments.pset(tmp.sys, tmp.key, v);
+      reset(ctx);
+      await ctx.reply("✅ Saqlandi.");
+      await paySysMenu(ctx, tmp.sys);
+      return true;
+    }
     case "adm:ptest": {
       if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
       const [code, pid, sid] = t.split(/\s+/);
@@ -1097,19 +1330,31 @@ async function adminText(ctx) {
     case "adm:btlabel":
     case "adm:btelabel": {
       const label = t.trim();
-      const taken = (data().settings.buttons || []).some((b) => b.label === label && String(b.id) !== String(tmp.id));
-      if (!label || label.length > 30 || Object.values(MENU).includes(label) || taken) {
-        await ctx.reply("❗️ Nom 1–30 belgi bo'lishi, boshqa tugma yoki asosiy menyu nomi bilan bir xil bo'lmasligi kerak. Qayta yuboring:");
+      const editing = s.step === "adm:btelabel";
+      const cur = editing ? findBtn(tmp.id) : null;
+      const parent = editing ? (cur ? cur.parent || 0 : 0) : tmp.parent || 0;
+      // Nom o'sha menyu ichida takrorlanmasligi kerak; asosiy menyuda — asosiy tugmalar nomi bilan ham
+      const taken = childBtns(parent).some((b) => b.label === label && String(b.id) !== String(tmp.id));
+      if (!label || label.length > 30 || (!parent && Object.values(MENU).includes(label)) || taken) {
+        await ctx.reply("❗️ Nom 1–30 belgi bo'lishi, shu menyudagi boshqa tugma (yoki asosiy menyu tugmasi) nomi bilan bir xil bo'lmasligi kerak. Qayta yuboring:");
         return true;
       }
-      if (s.step === "adm:btelabel") {
-        const b = findBtn(tmp.id);
-        if (b) { b.label = label; save(); }
+      if (editing) {
+        if (cur) { cur.label = label; save(); }
         reset(ctx);
         await btnMenu(ctx, tmp.id);
         return true;
       }
       tmp.label = label;
+      if (tmp.type === "menu") {
+        const id = nextId("btn");
+        data().settings.buttons.push({ id, label, type: "menu", content: "", parent });
+        save();
+        reset(ctx);
+        await ctx.reply("✅ Ichki menyu yaratildi. Endi ichiga tugmalar qo'shing.");
+        await btnMenu(ctx, id);
+        return true;
+      }
       if (tmp.type === "func") {
         s.step = "adm:btfunc";
         const fk = new InlineKeyboard();
@@ -1133,7 +1378,7 @@ async function adminText(ctx) {
       const b = edit ? findBtn(tmp.id) : null;
       const type = edit ? (b && b.type) : tmp.type;
       const content = normContent(type, t);
-      if (!content) {
+      if (content === null || content === undefined) {
         await ctx.reply(type === "link" ? "❗️ To'g'ri havola yuboring (https://... yoki @kanal):" : "❗️ Matn 1–3000 belgi bo'lishi kerak:");
         return true;
       }
@@ -1144,10 +1389,10 @@ async function adminText(ctx) {
         return true;
       }
       const id = nextId("btn");
-      data().settings.buttons.push({ id, label: tmp.label, type, content });
+      data().settings.buttons.push({ id, label: tmp.label, type, content, parent: tmp.parent || 0 });
       save();
       reset(ctx);
-      await ctx.reply("✅ Tugma qo'shildi. Foydalanuvchilarda /start bosganda yoki «Xabar yuborish» dan keyin ko'rinadi.");
+      await ctx.reply(tmp.parent ? "✅ Tugma menyuga qo'shildi." : "✅ Tugma qo'shildi. Foydalanuvchilarda /start bosganda yoki «Xabar yuborish» dan keyin ko'rinadi.");
       await btnMenu(ctx, id);
       return true;
     }
