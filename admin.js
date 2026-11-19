@@ -811,12 +811,21 @@ adm.callbackQuery(/^a:plv:(\d+)$/, async (ctx) => {
     if (!r.offers.length) {
       return ctx.reply(head + "Paketlar taniy olinmadi. Xom javob:\n<pre>" + esc(r.raw.slice(0, 1500)) + "</pre>", { parse_mode: "HTML" });
     }
-    const lines = r.offers.slice(0, 60).map((o) => `<code>${esc(o.id)}</code> — ${esc(o.name || "?")}${o.price !== "" ? " — " + esc(String(o.price)) + " USDT" : ""}`);
-    await ctx.reply(head + "SKU (paketga yozing) — nomi — narxi:\n" + lines.join("\n"), {
+    // SKU lar juda uzun (≈100 belgi), shuning uchun ro'yxatda faqat nomi va narxi; SKU larni import o'zi yozadi
+    const lines = r.offers.map((o, i) => `${i + 1}. ${esc(o.name || "?")}${o.price !== "" ? " — " + esc(String(o.price)) + " USDT" : ""}`);
+    const chunks = [];
+    let cur = "";
+    for (const ln of lines) {
+      if ((cur + ln + "\n").length > 3300) { chunks.push(cur); cur = ""; }
+      cur += ln + "\n";
+    }
+    if (cur) chunks.push(cur);
+    const intro = head + `Paketlar: <b>${r.offers.length}</b> ta. SKU lar juda uzun, shuning uchun ularni quyidagi tugma o'zi yozadi.\n\n`;
+    await ctx.reply(intro + chunks[0], {
       parse_mode: "HTML",
       reply_markup: new InlineKeyboard().text("📥 Hammasini botga avtomatik qo'shish", `a:pli:${ctx.match[1]}`),
     });
-    if (r.offers.length > 60) await ctx.reply(`Yana ${r.offers.length - 60} ta paket bor — Ludovex kabinetida ko'ring.`);
+    for (const c of chunks.slice(1, 6)) await ctx.reply(c, { parse_mode: "HTML" });
   } catch (e) {
     await ctx.reply("❌ Xato: " + esc(e.message), { parse_mode: "HTML" });
   }
@@ -1558,7 +1567,7 @@ async function adminText(ctx) {
             const r = await provider.offers(p.item.key);
             if (!r.offers.length) { out.push(`⚠️ ${esc(line)}: paketlar topilmadi`); continue; }
             const res = provider.importOffers(p.item.key, p.item.name, r.offers, rt, mk);
-            out.push(`✅ ${esc(res.game.name)}: ${res.added} ta qo'shildi` + (res.skipped ? `, ${res.skipped} ta avval bor` : "") + (res.noPrice ? `, ${res.noPrice} tasida narx yo'q` : ""));
+            out.push(`✅ ${esc(res.game.name)}: ${res.added} ta qo'shildi` + (res.skipped ? `, ${res.skipped} ta avval bor` : "") + (res.noPrice ? `, ${res.noPrice} tasida narx yo'q` : "") + (res.more ? `, yana ${res.more} ta qoldi (qayta import qiling)` : ""));
           } else if (p.ambiguous) {
             out.push(`❓ ${esc(line)}: bir nechta topildi (${p.ambiguous.map(esc).join("; ")}) — aniqroq yozing`);
           } else {
@@ -1587,6 +1596,7 @@ async function adminText(ctx) {
           `✅ <b>${esc(res.game.name)}</b>${res.createdGame ? " (yangi o'yin yaratildi)" : ""}\nQo'shildi: ${res.added} ta paket` +
             (res.skipped ? `\nAvval bor edi: ${res.skipped} ta` : "") +
             (res.noPrice ? `\nNarxi noma'lum, o'tkazib yuborildi: ${res.noPrice} ta` : "") +
+            (res.more ? `\nBir martada 60 tagacha qo'shiladi, yana ${res.more} ta qoldi: importni qayta bosing` : "") +
             `\n\n⚠️ Mobile Legends kabi o'yinlarda Server ID kerak bo'lsa: Panel → O'yinlar → o'yin → «Server ID» ni yoqing. Narxlarni «Paketlar» bo'limida ko'rib chiqing.`,
           { parse_mode: "HTML" }
         );

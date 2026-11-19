@@ -312,7 +312,7 @@ function importOffers(gameKey, gameName, offers, rate, markup) {
     added++;
   }
   save();
-  return { game, createdGame, added, skipped, noPrice };
+  return { game, createdGame, added, skipped, noPrice, more: Math.max(0, offers.length - 60) };
 }
 
 // Qidiruv qatoriga mos o'yinni topadi: aniq bitta bo'lsa — shu, bir nechta bo'lsa — nomi aynan mos kelganini, aks holda noaniq
