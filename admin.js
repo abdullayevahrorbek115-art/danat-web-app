@@ -1528,10 +1528,23 @@ async function adminText(ctx) {
     }
     case "adm:lxm": {
       if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
-      const lines = t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
-      const [rt, mk] = (lines[0] || "").replace(",", ".").split(/\s+/).map(Number);
-      if (!Number.isFinite(rt) || rt < 1000 || rt > 100000 || !Number.isFinite(mk) || mk < 0 || mk > 500 || lines.length < 2) {
-        await ctx.reply("❗️ Birinchi qator: kurs va ustama (masalan <code>12800 10</code>), keyingi qatorlar: o'yin nomlari. Qayta yuboring:", { parse_mode: "HTML" });
+      const raw = t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      // Birinchi qatordan kurs va ustamani olamiz; shu qatorda qolgan so'zlar o'yin nomi bo'ladi ("12800 10 pubg mobile" ham bo'ladi)
+      const first = (raw[0] || "").replace(",", ".").split(/\s+/).filter(Boolean);
+      const nums = [];
+      const restWords = [];
+      for (const w of first) {
+        if (nums.length < 2 && /^\d+(\.\d+)?$/.test(w)) nums.push(Number(w));
+        else restWords.push(w);
+      }
+      const [rt, mk] = nums;
+      if (!Number.isFinite(rt) || rt < 1000 || rt > 100000 || !Number.isFinite(mk) || mk < 0 || mk > 500) {
+        await ctx.reply("❗️ Birinchi qatorda kurs va ustama bo'lsin, masalan <code>12800 10</code>. Qayta yuboring:", { parse_mode: "HTML" });
+        return true;
+      }
+      const lines = [raw[0], ...(restWords.length ? [restWords.join(" ")] : []), ...raw.slice(1)];
+      if (lines.length < 2) {
+        await ctx.reply("❗️ Kurs va ustama qabul qilindi, endi o'yin nomini ham yozing. Hammasini birga yuboring, masalan:\n<code>12800 10\nfree fire cis\npubg mobile auto</code>", { parse_mode: "HTML" });
         return true;
       }
       reset(ctx);
