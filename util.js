@@ -5,6 +5,7 @@ const MENU = {
   promo: "🎁 Promo kod",
   ref: "👥 Do'st taklif qilish",
   help: "☎️ Aloqa",
+  api: "🔌 API",
 };
 
 // HTML parse_mode uchun xavfsiz matn

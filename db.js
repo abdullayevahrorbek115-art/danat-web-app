@@ -21,6 +21,7 @@ const defaults = () => ({
     refBonus: 0, // taklif qilgan foydalanuvchiga bonus (so'm), 0 = o'chiq
     requiredChannels: [], // majburiy obuna kanallari (@username)
     ordersChat: "", // buyurtma xabarlari boradigan guruh/kanal (ID yoki @username)
+    apiEnabled: true, // mijozlar uchun HTTP API (panel → 🔌 API)
     pay: {}, // avtomatik to'lov tizimlari (panel → To'lov tizimlari): click, payme, card
   },
   games: [

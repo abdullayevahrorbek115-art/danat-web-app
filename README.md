@@ -103,3 +103,42 @@ Panel → 💳 To'lov tizimlari → «🏦 Karta (avto, noyob summa)». Karta ra
 Panel → 💰 Hisobot: bugun, kecha, oxirgi 7 kun, shu oy va umumiy **kirim** (hisob to'ldirishlar: Click, Payme, karta, chek), **savdo** (buyurtmalarga sarflangan pul), mijozlar balansida turgan pul. «Kunlar bo'yicha» (31 kun) va «Oylar bo'yicha» (12 oy) tugmalari ham bor.
 - **Foyda**: paket menyusida «💰 Tannarx» ni kiriting (siz provayderga qancha to'laysiz) — hisobotda tannarx va foyda chiqadi. Tannarx faqat keyingi buyurtmalar uchun hisoblanadi.
 - **Kunlik avto-hisobot**: har kuni 23:55 da adminlarga yuboriladi (panelda o'chirib qo'yish mumkin). Vaqt mintaqasi: `.env` da `TIMEZONE` (standart Asia/Tashkent).
+
+## 🎟 Avtomatik kod ombori (API siz avto-yetkazish)
+Provayder API si bo'lmasa ham bot buyurtmani **o'zi** yetkaza oladi — agar mahsulot kod ko'rinishida bo'lsa (UC/Free Fire voucher kodi, gift kartalar, Premium gift havolasi va h.k.).
+1. Panel → 🎮 O'yinlar → o'yin → 📦 Paketlar → paket → «Turi» tugmasini bosib **🎟 avto kod** ga o'tkazing.
+2. «🗂 Kod ombori» → «➕ Kod qo'shish» → kodlarni yuboring (har qatorda bitta).
+3. Mijoz sotib olganda Player ID so'ralmaydi: to'lovdan so'ng ombordan bitta kod olinib, mijozga **shu zahoti** yuboriladi. Ombor tugasa adminga xabar boradi va paket «(tugagan)» deb ko'rinadi.
+
+Eslatma: Player ID ga to'g'ridan-to'g'ri donat tushirish va nikni ko'rsatish faqat provayder API si bilan mumkin. Provayder kodi va SKU maydonlari panelda faqat Sozlamalarda rejim **API** bo'lganda ko'rinadi.
+ID tekshirish endi mijozni noto'g'ri to'smaydi: provayder ID ni aniq «topilmadi» desagina rad etiladi; sozlama to'liq bo'lmasa yoki javob tushunarsiz bo'lsa, ID «tekshirilmagan» deb o'tkaziladi.
+
+## 🔌 Mijozlar uchun API (reseller)
+Panel → 🔌 API (mijozlar). Foydalanuvchi botdagi «🔌 API» tugmasini bosib so'rov yuboradi, siz panelda tasdiqlaysiz va kalit unga botning o'zida beriladi. API orqali buyurtmalar o'sha foydalanuvchining bot balansidan to'lanadi. Hujjat botning o'zida chiqadi; asosiy yo'llar: `GET /api/v1/balance`, `GET /api/v1/products`, `POST /api/v1/check`, `POST /api/v1/order`, `GET /api/v1/order/ID`. API ishlashi uchun `.env` da `PUBLIC_URL` (https manzil) bo'lishi shart.
+
+## 🖥 Yaxshi serverga joylash (tavsiya: VPS)
+Render/Railway bepul tarifida bot "uxlab qoladi" va `data/db.json` yo'qolishi mumkin — to'lov va API uchun bu xavfli. Arzon VPS (Ubuntu, 1 GB RAM yetadi) olish yaxshiroq:
+1. Serverga kirib: `sudo apt update && sudo apt install -y nodejs npm nginx` (Node 18+ kerak; eski bo'lsa nodesource dan o'rnating).
+2. Loyihani yuklab, `npm install`, `.env` ni to'ldiring (`BOT_TOKEN`, `ADMIN_IDS`, `PUBLIC_URL=https://sizning-domen`, `PORT=3000`).
+3. `sudo npm i -g pm2 && pm2 start bot.js --name donat-bot && pm2 save && pm2 startup`
+4. Domenni serverga yo'naltiring, nginx da `proxy_pass http://127.0.0.1:3000;` qo'ying va `sudo certbot --nginx` bilan https oling (Click/Payme/API https talab qiladi).
+5. `data/db.json` ni har kuni zaxiralang (masalan cron bilan boshqa joyga nusxa).
+
+## ⚡ Ludovex ni ulash (provayder)
+Hujjat: https://ludovex.org/ru/docs
+1. Ludovex kabinetida (Кабинет → API-ключи) kalit yarating, unga **read** va **order** ruxsatlarini bering.
+2. Panel → 🔌 Provayder → **⚡ Ludovex ni ulash** → kalitni yuboring (rejim avtomatik API bo'ladi).
+3. **📋 Ludovex katalogi**: o'yin nomini yozing (masalan pubg), o'yinni tanlang — bot **provayder kodi** (`game_key`) va paketlar **SKU** (`variation_id`) ro'yxatini ko'rsatadi. Kodni o'yinga («🔑 Provayder kodi»), SKU ni paketga («🔑 Provayder SKU») yozing.
+4. Narxni o'zingiz so'mda qo'yasiz (Ludovex narxlari USDT da). Avval kichik buyurtma bilan sinang.
+
+Eslatmalar:
+- Ludovex da ID tekshirish (nik) so'rovi hujjatda yo'q, shuning uchun bot ID ni «tekshirilmagan» deb o'tkazadi.
+- Ludovex buyurtmani darhol bajarmasligi mumkin (PROCESSING). Bot holatni har 15 soniyada so'raydi: COMPLETED bo'lsa mijozga xabar beradi, FAILED/REFUNDED bo'lsa pulni qaytaradi. 30 daqiqada natija bo'lmasa adminga qo'lda tekshirish uchun beriladi.
+- Ludovex hamyonida (USDT) mablag' bo'lishi kerak, aks holda buyurtmalar rad etiladi va mijozga pul qaytariladi.
+- Yetkazilgan kod (gift karta) javobda `code`/`codes` kabi maydonda kelsa, mijozga yuboriladi; boshqa nomda bo'lsa, Ludovex sinov muhitida (ludovex.org/ru/sandbox) javobni ko'rib, menga ayting.
+
+### 📥 Katalogdan avtomatik import
+Panel → 🔌 Provayder → 📋 Ludovex katalogi → o'yinni tanlang → **📥 Hammasini botga avtomatik qo'shish**. Kurs (1 USDT = necha so'm) va ustama foizini yozasiz (masalan `12800 10`). Bot o'yinni (provayder kodi bilan), barcha paketlarni (SKU, narx, tannarx) o'zi yaratadi. Nomi mos kelgan, kodi yo'q o'yin bo'lsa (masalan «PUBG Mobile») kodni shunga yozadi. Mobile Legends kabilarda Server ID ni qo'lda yoqing.
+
+## 📝 Ko'p paketni birdan qo'shish
+Panel → 🎮 O'yinlar → o'yin → 📦 Paketlar → «📝 Ko'p paketni birdan qo'shish». Har qatorga bitta paket yozing: `60 UC - 12000`. Provayder kodi va SKU shart emas: Sozlamalarda rejim «qo'lda» bo'lsa, bu maydonlar panelda ko'rinmaydi va buyurtmani siz «Bajarildi» bilan yopasiz.

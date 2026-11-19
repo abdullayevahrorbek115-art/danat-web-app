@@ -118,3 +118,5 @@ bot.start({ onStart: (me) => console.log(`✅ @${me.username} ishga tushdi`) });
 require("./payments").startServer(() => bot.api);
 // Kunlik moliyaviy hisobot (har kuni 23:55 da adminlarga)
 require("./report").startReports(() => bot.api);
+// Provayderda jarayondagi buyurtmalarni kuzatish
+require("./orders").startPolling(() => bot.api);

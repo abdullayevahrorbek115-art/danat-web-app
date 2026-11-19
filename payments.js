@@ -511,6 +511,9 @@ function createServer(getApi) {
     const [rawPath, qs] = (req.url || "/").split("?");
     const path = rawPath.replace(/\/+$/, "") || "/";
     const query = Object.fromEntries(new URLSearchParams(qs || ""));
+    if (path === "/api/v1" || path.startsWith("/api/v1/")) {
+      return require("./api").handle(req, res, getApi(), path, readBody);
+    }
     if (req.method !== "POST") {
       res.writeHead(200);
       return res.end("OK");

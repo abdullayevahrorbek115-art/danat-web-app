@@ -4,6 +4,7 @@ const { data, save, nextId } = require("./db");
 const { isAdmin, isMainAdmin, adminIds, allAdmins } = require("./config");
 const { esc, fmt, show, sleep, MENU } = require("./util");
 const provider = require("./provider");
+const apiSvc = require("./api");
 const payments = require("./payments");
 const report = require("./report");
 const { mainKb } = require("./user");
@@ -23,6 +24,7 @@ const reset = (ctx) => {
   ctx.session.tmp = {};
 };
 const findGame = (id) => data().games.find((g) => g.id === Number(id));
+const apiOn = () => data().settings.providerMode === "api";
 const findPkg = (id) => data().packages.find((p) => p.id === Number(id));
 const parseNum = (t) => parseInt(String(t).replace(/[\s,._]/g, ""), 10);
 
@@ -58,7 +60,9 @@ const panelKb = () =>
     .text("🔘 Tugmalar", "a:btns")
     .row()
     .text("💳 To'lov tizimlari", "a:pay")
-    .text("💰 Hisobot", "a:rep");
+    .text("💰 Hisobot", "a:rep")
+    .row()
+    .text("🔌 API (mijozlar)", "a:akl");
 
 async function panel(ctx) {
   reset(ctx);
@@ -107,16 +111,16 @@ async function gameMenu(ctx, id) {
     `Holat: ${g.active ? "✅ yoqilgan" : "🚫 o'chirilgan"}\n` +
     `Turi: ${g.kind === "tg" ? "⭐ Telegram (username so'raladi)" : "🎮 O'yin (Player ID so'raladi)"}\n` +
     `Server ID so'rash: ${g.needsServer ? "ha" : "yo'q"}\n` +
-    `Provayder kodi: ${g.providerCode ? "<code>" + esc(g.providerCode) + "</code>" : "—"}\n` +
+    (apiOn() ? `Provayder kodi: ${g.providerCode ? "<code>" + esc(g.providerCode) + "</code>" : "—"}\n` : "") +
     `Paketlar: ${n} ta`;
   const kb = new InlineKeyboard()
     .text(`📦 Paketlar (${n})`, `a:pl:${g.id}`)
     .row()
     .text("➕ Paket qo'shish", `a:pn:${g.id}`)
     .row()
-    .text("✏️ Nomi", `a:ge:${g.id}`)
-    .text("🔑 Provayder kodi", `a:gc:${g.id}`)
-    .row()
+    .text("✏️ Nomi", `a:ge:${g.id}`);
+  if (apiOn()) kb.text("🔑 Provayder kodi", `a:gc:${g.id}`);
+  kb.row()
     .text(g.needsServer ? "🌐 Server ID: yoqilgan" : "🌐 Server ID: o'chiq", `a:gs:${g.id}`)
     .row()
     .text(g.kind === "tg" ? "⭐ Turi: Telegram (username)" : "🎮 Turi: O'yin (ID)", `a:gk:${g.id}`)
@@ -193,7 +197,8 @@ async function packagesList(ctx, gameId) {
   data()
     .packages.filter((p) => p.gameId === g.id)
     .forEach((p) => kb.text(`${p.active ? "✅" : "🚫"} ${p.name} — ${fmt(p.price)}`, `a:p:${p.id}`).row());
-  kb.text("➕ Paket qo'shish", `a:pn:${g.id}`).row().text("⬅️ Orqaga", `a:g:${g.id}`);
+  kb.text("➕ Paket qo'shish", `a:pn:${g.id}`).row();
+  kb.text("📝 Ko'p paketni birdan qo'shish", `a:pb:${g.id}`).row().text("⬅️ Orqaga", `a:g:${g.id}`);
   await show(ctx, `📦 <b>${esc(g.name)}</b> paketlari:`, kb);
 }
 
@@ -204,14 +209,18 @@ async function pkgMenu(ctx, id) {
   const text =
     `📦 <b>${esc(p.name)}</b>\n🎮 ${esc(g ? g.name : "?")}\n💵 Narx: <b>${fmt(p.price)}</b>\n` +
     `Holat: ${p.active ? "✅ yoqilgan" : "🚫 o'chirilgan"}\n` +
-    `Provayder SKU: ${p.sku ? "<code>" + esc(p.sku) + "</code>" : "—"}\n` +
+    (apiOn() ? `Provayder SKU: ${p.sku ? "<code>" + esc(p.sku) + "</code>" : "—"}\n` : "") +
+    `Yetkazish: ${p.delivery === "code" ? "🎟 avtomatik kod (ombor: " + (p.stock || []).length + " ta)" : "👤 ID bo'yicha (qo'lda" + (apiOn() ? " yoki API" : "") + ")"}\n` +
     `Tannarx: ${p.cost ? fmt(p.cost) : "—"} <i>(hisobotda foyda hisoblash uchun)</i>`;
   const kb = new InlineKeyboard()
     .text("✏️ Nomi", `a:pe:${p.id}`)
     .text("💵 Narxi", `a:pp:${p.id}`)
     .row()
-    .text("🔑 Provayder SKU", `a:pk:${p.id}`)
-    .text("💰 Tannarx", `a:pco:${p.id}`)
+    .text(p.delivery === "code" ? "🎟 Turi: avto kod" : "👤 Turi: ID bo'yicha", `a:sd:${p.id}`)
+    .row();
+  if (p.delivery === "code") kb.text(`🗂 Kod ombori (${(p.stock || []).length})`, `a:sk:${p.id}`).row();
+  if (apiOn()) kb.text("🔑 Provayder SKU", `a:pk:${p.id}`);
+  kb.text("💰 Tannarx", `a:pco:${p.id}`)
     .row()
     .text(p.active ? "🚫 O'chirib qo'yish" : "✅ Yoqish", `a:pt:${p.id}`)
     .row()
@@ -221,6 +230,14 @@ async function pkgMenu(ctx, id) {
   await show(ctx, text, kb);
 }
 
+adm.callbackQuery(/^a:pb:(\d+)$/, (ctx) =>
+  ask(
+    ctx,
+    "adm:pbulk",
+    { gameId: Number(ctx.match[1]) },
+    "📝 Paketlarni bitta xabarda yuboring — <b>har qatorga bitta paket</b>: nomi va narxi (so'mda).\n\nMasalan:\n<code>60 UC - 12000\n325 UC - 60000\n660 UC - 120000</code>"
+  )
+);
 adm.callbackQuery(/^a:pl:(\d+)$/, async (ctx) => { await ctx.answerCallbackQuery(); await packagesList(ctx, ctx.match[1]); });
 adm.callbackQuery(/^a:p:(\d+)$/, async (ctx) => { await ctx.answerCallbackQuery(); await pkgMenu(ctx, ctx.match[1]); });
 adm.callbackQuery(/^a:pn:(\d+)$/, (ctx) =>
@@ -234,6 +251,33 @@ adm.callbackQuery(/^a:pk:(\d+)$/, (ctx) =>
 adm.callbackQuery(/^a:pco:(\d+)$/, (ctx) =>
   ask(ctx, "adm:pcost", { id: ctx.match[1] }, "💰 Paketning tannarxini yuboring (so'mda — siz qancha to'laysiz). Olib tashlash uchun <code>0</code>:")
 );
+adm.callbackQuery(/^a:sd:(\d+)$/, async (ctx) => {
+  const p = findPkg(ctx.match[1]);
+  if (p) { p.delivery = p.delivery === "code" ? "" : "code"; if (!p.stock) p.stock = []; save(); }
+  await ctx.answerCallbackQuery();
+  await pkgMenu(ctx, ctx.match[1]);
+});
+adm.callbackQuery(/^a:sk:(\d+)$/, async (ctx) => {
+  const p = findPkg(ctx.match[1]);
+  if (!p) return ctx.answerCallbackQuery();
+  await ctx.answerCallbackQuery();
+  const kb = new InlineKeyboard()
+    .text("➕ Kod qo'shish", `a:ska:${p.id}`)
+    .row()
+    .text("🧹 Omborni tozalash", `a:skc:${p.id}`)
+    .row()
+    .text("⬅️ Orqaga", `a:p:${p.id}`);
+  await show(ctx, `🗂 <b>${esc(p.name)}</b> — kod ombori: <b>${(p.stock || []).length}</b> ta kod.\nMijoz sotib olganda kod shu yerdan avtomatik yuboriladi.`, kb);
+});
+adm.callbackQuery(/^a:ska:(\d+)$/, (ctx) =>
+  ask(ctx, "adm:stock", { id: ctx.match[1] }, "🎟 Kodlarni yuboring — <b>har qatorga bitta kod</b> (bir nechta qator yozishingiz mumkin):")
+);
+adm.callbackQuery(/^a:skc:(\d+)$/, async (ctx) => {
+  const p = findPkg(ctx.match[1]);
+  if (p) { p.stock = []; save(); }
+  await ctx.answerCallbackQuery({ text: "Ombor tozalandi" });
+  await pkgMenu(ctx, ctx.match[1]);
+});
 adm.callbackQuery(/^a:pt:(\d+)$/, async (ctx) => {
   const p = findPkg(ctx.match[1]);
   if (p) { p.active = !p.active; save(); }
@@ -532,6 +576,75 @@ adm.callbackQuery("a:cod", async (ctx) => {
   await chanScreen(ctx);
 });
 
+// ---------- API (mijozlarga kalit berish) ----------
+const apiKeyMsg = (key) =>
+  `🔑 <b>Sizga API kalit berildi</b>\n<code>${key}</code>\n\nManzil: <code>${esc(apiSvc.baseUrl())}</code>\n⚠️ Kalitni hech kimga bermang va xabarni saqlab qo'ying — u boshqa ko'rsatilmaydi.\n\n` + apiSvc.docsText();
+
+async function apiScreen(ctx) {
+  const all = Object.values(data().users);
+  const withKey = all.filter((u) => u.apiHash);
+  const reqs = all.filter((u) => u.apiReq && !u.apiHash);
+  const kb = new InlineKeyboard();
+  reqs.forEach((u) => kb.text(`📨 So'rov: ${u.name || u.id}`, `a:aku:${u.id}`).row());
+  withKey.forEach((u) => kb.text(`🔑 ${u.name || "Foydalanuvchi"} (${u.id})`, `a:aku:${u.id}`).row());
+  kb.text("➕ ID bo'yicha API berish", "a:akn").row();
+  kb.text(apiSvc.enabled() ? "🟢 API: yoqilgan (o'chirish)" : "🔴 API: o'chiq (yoqish)", "a:ake").row();
+  kb.text("⬅️ Orqaga", "a:home");
+  await show(
+    ctx,
+    `🔌 <b>API (mijozlar uchun)</b>\nManzil: <code>${esc(apiSvc.baseUrl())}</code>\nAPI egalari: ${withKey.length} ta • So'rovlar: ${reqs.length} ta\n\nFoydalanuvchi botdagi «🔌 API» tugmasi orqali so'raydi, siz shu yerdan tasdiqlaysiz. API orqali buyurtmalar foydalanuvchining bot balansidan to'lanadi.`,
+    kb
+  );
+}
+async function giveKey(ctx, u) {
+  const key = apiSvc.issueKey(u);
+  await safeSend(ctx.api, u.id, apiKeyMsg(key));
+}
+adm.callbackQuery("a:akl", async (ctx) => { await ctx.answerCallbackQuery(); await apiScreen(ctx); });
+adm.callbackQuery("a:ake", async (ctx) => {
+  data().settings.apiEnabled = !apiSvc.enabled();
+  save();
+  await ctx.answerCallbackQuery({ text: apiSvc.enabled() ? "API yoqildi" : "API o'chirildi" });
+  await apiScreen(ctx);
+});
+adm.callbackQuery("a:akn", (ctx) => ask(ctx, "adm:apiuser", {}, "👤 API beriladigan foydalanuvchining Telegram ID sini yuboring (u botga /start bosgan bo'lishi kerak):"));
+adm.callbackQuery(/^a:aku:(\d+)$/, async (ctx) => {
+  const u = data().users[ctx.match[1]];
+  if (!u) return ctx.answerCallbackQuery({ text: "Foydalanuvchi topilmadi", show_alert: true });
+  await ctx.answerCallbackQuery();
+  const kb = new InlineKeyboard()
+    .text(u.apiHash ? "🔄 Yangi kalit berish" : "✅ Kalit berish", `a:akg:${u.id}`)
+    .row();
+  if (u.apiHash) kb.text("🗑 API ni olib tashlash", `a:akd:${u.id}`).row();
+  kb.text("⬅️ Orqaga", "a:akl");
+  const apiOrders = data().orders.filter((o) => o.userId === u.id && o.via === "api").length;
+  await show(ctx, `👤 ${esc(u.name || "")} ${u.username ? "@" + esc(u.username) : ""} (<code>${u.id}</code>)\n💰 Balans: ${fmt(u.balance)}\n🔌 API: ${u.apiHash ? "ulangan" : u.apiReq ? "so'rov yuborgan" : "yo'q"}\nAPI orqali buyurtmalar: ${apiOrders} ta`, kb);
+});
+adm.callbackQuery(/^a:akg:(\d+)$/, async (ctx) => {
+  const u = data().users[ctx.match[1]];
+  if (!u) return ctx.answerCallbackQuery({ text: "Foydalanuvchi topilmadi", show_alert: true });
+  await giveKey(ctx, u);
+  await ctx.answerCallbackQuery({ text: "Kalit foydalanuvchiga yuborildi" });
+});
+adm.callbackQuery(/^a:akr:(\d+)$/, async (ctx) => {
+  const u = data().users[ctx.match[1]];
+  if (u && !u.apiHash) {
+    delete u.apiReq;
+    save();
+    await safeSend(ctx.api, u.id, "😔 API so'rovingiz rad etildi. Savollar bo'lsa admin bilan bog'laning: " + esc(data().settings.contact));
+  }
+  await ctx.answerCallbackQuery({ text: "Rad etildi" });
+});
+adm.callbackQuery(/^a:akd:(\d+)$/, async (ctx) => {
+  const u = data().users[ctx.match[1]];
+  if (u) {
+    apiSvc.revokeKey(u);
+    await safeSend(ctx.api, u.id, "ℹ️ API kalitingiz o'chirildi.");
+  }
+  await ctx.answerCallbackQuery({ text: "Olib tashlandi" });
+  await apiScreen(ctx);
+});
+
 // ---------- Adminlar (faqat bosh adminlar boshqaradi) ----------
 async function mainOnly(ctx) {
   if (isMainAdmin(ctx.from.id)) return true;
@@ -643,7 +756,10 @@ async function provScreen(ctx, group = "main") {
       kb.text(PLABEL[k], `a:pf:${k}`);
       if (i % 2 === 1) kb.row();
     });
-    kb.row().text("🔎 ID tekshirish sozlamasi", "a:pg:check").row();
+    kb.row().text("⚡ Ludovex ni ulash", "a:plx").row();
+    kb.text("📋 Ludovex katalogi (kod va SKU)", "a:plc").row();
+    kb.text("📥 Bir nechta o'yinni birdan import", "a:plm").row();
+    kb.text("🔎 ID tekshirish sozlamasi", "a:pg:check").row();
     kb.text("📦 Buyurtma sozlamasi", "a:pg:order").row();
     kb.text("🧪 ID tekshirishni sinash", "a:pt").row();
     kb.text("⬅️ Orqaga", "a:home");
@@ -656,6 +772,67 @@ async function provScreen(ctx, group = "main") {
   await show(ctx, text, kb);
 }
 
+// Ludovex: bir tugma bilan sozlash va katalogdan provayder kodi / SKU ni topish
+const lxCache = new Map(); // adminId -> [{key,name}]
+adm.callbackQuery("a:plx", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const st = data().settings;
+  st.provider = { ...(st.provider || {}), ...provider.LUDOVEX };
+  st.providerMode = "api";
+  save();
+  await ask(
+    ctx,
+    "adm:pf",
+    { key: "key" },
+    "⚡ Ludovex sozlamalari qo'yildi va rejim API ga o'tdi.\n\n🔑 Endi Ludovex kabinetidan (Кабинет → API-ключи) olgan API kalitingizni yuboring. Kalitga <b>read</b> va <b>order</b> ruxsatlarini bering. Xabaringiz xavfsizlik uchun o'chiriladi."
+  );
+});
+adm.callbackQuery("a:plm", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  await ask(
+    ctx,
+    "adm:lxm",
+    {},
+    "📥 Birinchi qatorga <b>kurs va ustama foiz</b>, keyingi qatorlarga o'yin nomlarini yozing (har qatorga bitta, 10 tagacha):\n\n<code>12800 10\nfree fire cis\nmobile legends uz\npubg mobile auto</code>\n\nBot har bir o'yinni katalogdan topib, barcha paketlarini narxi bilan qo'shadi. Noaniq yoki topilmaganlarini alohida aytadi."
+  );
+});
+adm.callbackQuery("a:plc", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  await ask(ctx, "adm:lxs", {}, "📋 O'yin nomining bir qismini yozing (masalan <code>pubg</code>) yoki hammasini ko'rish uchun <code>*</code> yuboring:");
+});
+adm.callbackQuery(/^a:plv:(\d+)$/, async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const g = (lxCache.get(ctx.from.id) || [])[Number(ctx.match[1])];
+  if (!g) return ctx.answerCallbackQuery({ text: "Qaytadan qidiring", show_alert: true });
+  await ctx.answerCallbackQuery();
+  try {
+    const r = await provider.offers(g.key);
+    const head = `🎮 <b>${esc(g.name || "O'yin")}</b>\nProvayder kodi (o'yinga yozing):\n<code>${esc(g.key)}</code>\n\n`;
+    if (!r.offers.length) {
+      return ctx.reply(head + "Paketlar taniy olinmadi. Xom javob:\n<pre>" + esc(r.raw.slice(0, 1500)) + "</pre>", { parse_mode: "HTML" });
+    }
+    const lines = r.offers.slice(0, 60).map((o) => `<code>${esc(o.id)}</code> — ${esc(o.name || "?")}${o.price !== "" ? " — " + esc(String(o.price)) + " USDT" : ""}`);
+    await ctx.reply(head + "SKU (paketga yozing) — nomi — narxi:\n" + lines.join("\n"), {
+      parse_mode: "HTML",
+      reply_markup: new InlineKeyboard().text("📥 Hammasini botga avtomatik qo'shish", `a:pli:${ctx.match[1]}`),
+    });
+    if (r.offers.length > 60) await ctx.reply(`Yana ${r.offers.length - 60} ta paket bor — Ludovex kabinetida ko'ring.`);
+  } catch (e) {
+    await ctx.reply("❌ Xato: " + esc(e.message), { parse_mode: "HTML" });
+  }
+});
+
+adm.callbackQuery(/^a:pli:(\d+)$/, async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const g = (lxCache.get(ctx.from.id) || [])[Number(ctx.match[1])];
+  if (!g) return ctx.answerCallbackQuery({ text: "Qaytadan qidiring", show_alert: true });
+  await ask(
+    ctx,
+    "adm:lxi",
+    { key: g.key, name: g.name },
+    "📥 Import: <b>kurs</b> va <b>ustama foiz</b> ni bo'sh joy bilan yuboring.\n\nMasalan <code>12800 10</code> — 1 USDT = 12 800 so'm, ustama 10%.\nPaket narxi: Ludovex narxi × kurs × (1 + ustama), 100 so'mgacha yaxlitlanadi. Tannarx ham yoziladi (hisobotda foyda chiqadi)."
+  );
+});
 adm.callbackQuery("a:prov", async (ctx) => {
   if (!(await mainOnly(ctx))) return;
   await ctx.answerCallbackQuery();
@@ -1102,6 +1279,49 @@ async function adminText(ctx) {
       await pkgMenu(ctx, tmp.id);
       return true;
     }
+    case "adm:pbulk": {
+      const g = findGame(tmp.gameId);
+      if (!g) { reset(ctx); return true; }
+      const ok = [], bad = [];
+      for (const line of t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)) {
+        const tail = "([\\d][\\d\\s.,_]*)\\s*(?:so'?m|sum|uzs)?$";
+        const m = new RegExp("^(.*\\S)\\s*[\\-–—:|=]\\s*" + tail, "i").exec(line) || new RegExp("^(.*?\\S)\\s+" + tail, "i").exec(line);
+        const price = m ? parseInt(m[2].replace(/[\s.,_]/g, ""), 10) : NaN;
+        const name = m ? m[1].trim() : "";
+        if (!name || !Number.isFinite(price) || price < 100 || price > 100000000) bad.push(line);
+        else ok.push({ name: name.slice(0, 40), price });
+      }
+      if (!ok.length) {
+        await ctx.reply("❗️ Hech narsa tanilmadi. Har qatorda nomi va narxi bo'lsin, masalan: <code>60 UC - 12000</code>. Qayta yuboring:", { parse_mode: "HTML" });
+        return true;
+      }
+      ok.forEach((x) => data().packages.push({ id: nextId("pkg"), gameId: g.id, name: x.name, price: x.price, active: true, sku: "" }));
+      save();
+      reset(ctx);
+      await ctx.reply(`✅ ${ok.length} ta paket qo'shildi.` + (bad.length ? `\n\n⚠️ Tanilmadi (${bad.length} ta):\n` + bad.map((x) => esc(x)).join("\n") : ""), { parse_mode: "HTML" });
+      await packagesList(ctx, g.id);
+      return true;
+    }
+    case "adm:stock": {
+      const p = findPkg(tmp.id);
+      const codes = t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      if (!p || !codes.length) { await ctx.reply("❗️ Hech bo'lmasa bitta kod yuboring:"); return true; }
+      p.stock = [...(p.stock || []), ...codes];
+      save();
+      reset(ctx);
+      await ctx.reply(`✅ ${codes.length} ta kod qo'shildi. Ombor: ${p.stock.length} ta.`);
+      await pkgMenu(ctx, tmp.id);
+      return true;
+    }
+    case "adm:apiuser": {
+      const u = data().users[Number(t)];
+      if (!u) { await ctx.reply("❗️ Bunday foydalanuvchi topilmadi (u botga /start bosgan bo'lishi kerak). Qayta yuboring:"); return true; }
+      reset(ctx);
+      await giveKey(ctx, u);
+      await ctx.reply(`✅ ${u.name || u.id} ga API kalit yuborildi.`);
+      await apiScreen(ctx);
+      return true;
+    }
     case "adm:psku": {
       const p = findPkg(tmp.id);
       if (p) { p.sku = t === "-" ? "" : t; save(); }
@@ -1306,6 +1526,91 @@ async function adminText(ctx) {
       await paySysMenu(ctx, tmp.sys);
       return true;
     }
+    case "adm:lxm": {
+      if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
+      const lines = t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      const [rt, mk] = (lines[0] || "").replace(",", ".").split(/\s+/).map(Number);
+      if (!Number.isFinite(rt) || rt < 1000 || rt > 100000 || !Number.isFinite(mk) || mk < 0 || mk > 500 || lines.length < 2) {
+        await ctx.reply("❗️ Birinchi qator: kurs va ustama (masalan <code>12800 10</code>), keyingi qatorlar: o'yin nomlari. Qayta yuboring:", { parse_mode: "HTML" });
+        return true;
+      }
+      reset(ctx);
+      await ctx.reply("⏳ Katalogdan olinmoqda, bir oz kuting...");
+      try {
+        const cat = await provider.catalog();
+        const out = [];
+        for (const line of lines.slice(1, 11)) {
+          const p = provider.pickGame(cat.items, line);
+          if (p.item) {
+            const r = await provider.offers(p.item.key);
+            if (!r.offers.length) { out.push(`⚠️ ${esc(line)}: paketlar topilmadi`); continue; }
+            const res = provider.importOffers(p.item.key, p.item.name, r.offers, rt, mk);
+            out.push(`✅ ${esc(res.game.name)}: ${res.added} ta qo'shildi` + (res.skipped ? `, ${res.skipped} ta avval bor` : "") + (res.noPrice ? `, ${res.noPrice} tasida narx yo'q` : ""));
+          } else if (p.ambiguous) {
+            out.push(`❓ ${esc(line)}: bir nechta topildi (${p.ambiguous.map(esc).join("; ")}) — aniqroq yozing`);
+          } else {
+            out.push(`❌ ${esc(line)}: topilmadi`);
+          }
+        }
+        await ctx.reply(out.join("\n") + `\n\n⚠️ Server ID kerak o'yinlarda (Mobile Legends) Panel → O'yinlar → o'yin → «Server ID» ni yoqing. Narxlarni «Paketlar» bo'limida tekshiring.`, { parse_mode: "HTML" });
+      } catch (e) {
+        await ctx.reply("❌ Xato: " + esc(e.message), { parse_mode: "HTML" });
+      }
+      return true;
+    }
+    case "adm:lxi": {
+      if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
+      const [rt, mk] = t.replace(",", ".").split(/\s+/).map(Number);
+      if (!Number.isFinite(rt) || rt < 1000 || rt > 100000 || !Number.isFinite(mk) || mk < 0 || mk > 500) {
+        await ctx.reply("❗️ Format: kurs ustama%, masalan <code>12800 10</code>. Qayta yuboring:", { parse_mode: "HTML" });
+        return true;
+      }
+      reset(ctx);
+      try {
+        const r = await provider.offers(tmp.key);
+        if (!r.offers.length) { await ctx.reply("Paketlar topilmadi."); return true; }
+        const res = provider.importOffers(tmp.key, tmp.name, r.offers, rt, mk);
+        await ctx.reply(
+          `✅ <b>${esc(res.game.name)}</b>${res.createdGame ? " (yangi o'yin yaratildi)" : ""}\nQo'shildi: ${res.added} ta paket` +
+            (res.skipped ? `\nAvval bor edi: ${res.skipped} ta` : "") +
+            (res.noPrice ? `\nNarxi noma'lum, o'tkazib yuborildi: ${res.noPrice} ta` : "") +
+            `\n\n⚠️ Mobile Legends kabi o'yinlarda Server ID kerak bo'lsa: Panel → O'yinlar → o'yin → «Server ID» ni yoqing. Narxlarni «Paketlar» bo'limida ko'rib chiqing.`,
+          { parse_mode: "HTML" }
+        );
+      } catch (e) {
+        await ctx.reply("❌ Xato: " + esc(e.message), { parse_mode: "HTML" });
+      }
+      return true;
+    }
+    case "adm:lxs": {
+      if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
+      reset(ctx);
+      await ctx.reply("⏳ Katalog olinmoqda...");
+      try {
+        const r = await provider.catalog();
+        const q = t.toLowerCase();
+        // Hamma so'z nomda yoki kodda bo'lishi kerak (qavs va belgilar e'tiborga olinmaydi): "free fire cis" -> Free Fire (CIS)
+        const words = q.replace(/[^\p{L}\p{N}*]+/gu, " ").split(" ").filter(Boolean);
+        const all = q === "*" ? r.items : r.items.filter((x) => {
+          const hay = (x.name + " " + x.key).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ");
+          return words.every((w) => hay.includes(w));
+        });
+        const found = all.slice(0, 40);
+        if (!r.items.length) {
+          await ctx.reply(`Katalog taniy olinmadi (HTTP ${r.status}). Xom javob:\n<pre>${esc(r.raw.slice(0, 1500))}</pre>`, { parse_mode: "HTML" });
+        } else if (!found.length) {
+          await ctx.reply("Hech narsa topilmadi. 📋 tugmasi orqali boshqa so'z bilan urinib ko'ring.");
+        } else {
+          lxCache.set(ctx.from.id, found);
+          const kb = new InlineKeyboard();
+          found.forEach((g, i) => kb.text((g.name || g.key).slice(0, 40), `a:plv:${i}`).row());
+          await ctx.reply(`Topildi: ${all.length} ta${all.length > found.length ? ` (birinchi ${found.length} tasi — aniqroq so'z yozing)` : ""}. Paketlarini ko'rish uchun tanlang:`, { reply_markup: kb });
+        }
+      } catch (e) {
+        await ctx.reply("❌ Xato: " + esc(e.message) + "\nAPI kalit va ruxsatlarni (read) tekshiring.", { parse_mode: "HTML" });
+      }
+      return true;
+    }
     case "adm:ptest": {
       if (!isMainAdmin(ctx.from.id)) { reset(ctx); return true; }
       const [code, pid, sid] = t.split(/\s+/);
@@ -1314,6 +1619,10 @@ async function adminText(ctx) {
         return true;
       }
       reset(ctx);
+      if (!provider.cfg().checkPath) {
+        await ctx.reply("ℹ️ Bu provayderda (Ludovex) ID tekshirish so'rovi yo'q, shuning uchun sinab bo'lmaydi. Bu xato emas: ulanish ishlayapti (katalog va import ishladi). Bot ID ni «tekshirilmagan» deb o'tkazadi. Mintaqani eng kichik paketni sotib olib sinang.");
+        return true;
+      }
       await ctx.reply("⏳ So'rov yuborilmoqda...");
       try {
         const r = await provider.testCheck(code, pid, sid || "");

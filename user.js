@@ -6,6 +6,7 @@ const provider = require("./provider");
 const { processOrder, notifyAdmins, notifyChat, statusLabel } = require("./orders");
 const { allAdmins } = require("./config");
 const payments = require("./payments");
+const apiSvc = require("./api");
 
 const user = new Composer();
 
@@ -21,6 +22,7 @@ const mainKb = () => {
     .row()
     .text(MENU.ref)
     .text(MENU.help);
+  if (apiSvc.enabled()) kb.row().text(MENU.api);
   // Admin paneldan qo'shilgan maxsus tugmalar (qatorda 2 tadan)
   // (ichki menyudagi tugmalar bu yerda ko'rinmaydi — ular menyu ichida chiqadi)
   topButtons().forEach((b, i) => {
@@ -61,7 +63,10 @@ async function showGame(ctx, gameId) {
   if (!game || !game.active) return show(ctx, "Bo'lim topilmadi yoki vaqtincha o'chirilgan.");
   const list = data().packages.filter((p) => p.gameId === game.id && p.active);
   const kb = new InlineKeyboard();
-  list.forEach((p) => kb.text(`${p.name} — ${fmt(p.price)}`, `p:${p.id}`).row());
+  list.forEach((p) => {
+    const out = p.delivery === "code" && !(p.stock || []).length;
+    kb.text(`${p.name} — ${fmt(p.price)}${out ? " (tugagan)" : ""}`, `p:${p.id}`).row();
+  });
   kb.text("⬅️ Orqaga", "games");
   const head = `${game.emoji} <b>${esc(game.name)}</b>\n`;
   await show(ctx, head + (list.length ? "Paketni tanlang:" : "Hozircha paketlar yo'q."), kb);
@@ -76,6 +81,19 @@ user.callbackQuery(/^p:(\d+)$/, async (ctx) => {
   const { pkg, game } = lookup(ctx.match[1]);
   if (!pkg || !game || !pkg.active || !game.active) {
     return ctx.answerCallbackQuery({ text: "Bu paket hozir mavjud emas", show_alert: true });
+  }
+  if (pkg.delivery === "code") {
+    if (!(pkg.stock || []).length) {
+      return ctx.answerCallbackQuery({ text: "😔 Bu paket hozir tugagan. Keyinroq urinib ko'ring.", show_alert: true });
+    }
+    await ctx.answerCallbackQuery();
+    ctx.session.step = "u:confirm";
+    ctx.session.tmp = { pkgId: pkg.id, playerId: "" };
+    const kb = new InlineKeyboard().text("✅ Tasdiqlash va to'lash", "buy").row().text("❌ Bekor", "cancel");
+    return ctx.reply(
+      `${game.emoji} <b>${esc(game.name)}</b> — ${esc(pkg.name)}\n💵 Narxi: <b>${fmt(pkg.price)}</b>\n\n🎟 To'lovdan so'ng kod <b>shu zahoti avtomatik</b> yuboriladi.`,
+      { parse_mode: "HTML", reply_markup: kb }
+    );
   }
   await ctx.answerCallbackQuery();
   ctx.session.step = "u:id";
@@ -110,9 +128,7 @@ async function verifyAccount(ctx) {
     r = await provider.checkId(game, s.tmp.playerId, s.tmp.serverId);
   } catch (e) {
     console.error("checkId xatosi:", e.message);
-    reset(ctx);
-    await ctx.reply("⚠️ ID tekshirish xizmati vaqtincha ishlamayapti. Birozdan keyin urinib ko'ring.");
-    return;
+    r = { ok: true, nickname: null };
   }
   if (!r.ok) {
     s.step = "u:id";
@@ -160,6 +176,10 @@ user.callbackQuery("buy", async (ctx) => {
   if (!pkg || !game || !pkg.active || !game.active) {
     reset(ctx);
     return ctx.answerCallbackQuery({ text: "Bu paket endi mavjud emas", show_alert: true });
+  }
+  if (pkg.delivery === "code" && !(pkg.stock || []).length) {
+    reset(ctx);
+    return ctx.answerCallbackQuery({ text: "😔 Bu paket hozirgina tugadi.", show_alert: true });
   }
   const u = me(ctx);
   if (u.balance < pkg.price) {
@@ -331,6 +351,46 @@ async function showReferral(ctx) {
   );
 }
 
+// ---------- API (mijozlar uchun) ----------
+async function showApi(ctx) {
+  const u = me(ctx);
+  if (!apiSvc.enabled()) return ctx.reply("🔌 API hozircha mavjud emas.");
+  const kb = new InlineKeyboard();
+  let text;
+  if (u.apiHash) {
+    text = `🔌 <b>API ulangan</b>\nManzil: <code>${esc(apiSvc.baseUrl())}</code>\n\nKalit xavfsizlik uchun saqlanmaydi — yo'qotsangiz yangisini oling (eskisi ishlamay qoladi).`;
+    kb.text("📖 Hujjat", "api:doc").row().text("🔄 Yangi kalit olish", "api:new");
+  } else if (u.apiReq) {
+    text = "⏳ API so'rovingiz admin tomonidan ko'rib chiqilmoqda.";
+  } else {
+    text = "🔌 <b>API</b>\nBotdagi buyurtmalarni o'z saytingiz yoki dasturingizdan avtomatik berish imkoniyati. Kerak bo'lsa so'rov yuboring — admin ko'rib chiqadi.";
+    kb.text("📨 API so'rash", "api:req");
+  }
+  await show(ctx, text, kb);
+}
+user.callbackQuery("api:req", async (ctx) => {
+  const u = me(ctx);
+  if (!apiSvc.enabled()) return ctx.answerCallbackQuery({ text: "API hozircha mavjud emas", show_alert: true });
+  if (u.apiHash || u.apiReq) return ctx.answerCallbackQuery({ text: "So'rov allaqachon yuborilgan yoki API ulangan", show_alert: true });
+  u.apiReq = Date.now();
+  save();
+  await ctx.answerCallbackQuery({ text: "So'rov yuborildi" });
+  await show(ctx, "⏳ API so'rovingiz adminga yuborildi. Javobni shu yerda olasiz.");
+  const kb = new InlineKeyboard().text("✅ Berish", `a:akg:${u.id}`).text("❌ Rad etish", `a:akr:${u.id}`);
+  await notifyAdmins(ctx.api, `🔌 <b>API so'rovi</b>\n👤 ${esc(u.name || "")} ${u.username ? "@" + esc(u.username) : ""} (<code>${u.id}</code>)\n💰 Balans: ${fmt(u.balance)}`, kb);
+});
+user.callbackQuery("api:new", async (ctx) => {
+  const u = me(ctx);
+  if (!u.apiHash || !apiSvc.enabled()) return ctx.answerCallbackQuery({ text: "API ulanmagan", show_alert: true });
+  const key = apiSvc.issueKey(u);
+  await ctx.answerCallbackQuery({ text: "Yangi kalit berildi" });
+  await ctx.reply(`🔑 <b>Yangi API kalit</b> (eskisi o'chdi):\n<code>${key}</code>\n\n⚠️ Uni hech kimga bermang. Bu xabarni saqlab qo'ying — kalit boshqa ko'rsatilmaydi.`, { parse_mode: "HTML" });
+});
+user.callbackQuery("api:doc", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.reply(apiSvc.docsText(), { parse_mode: "HTML" });
+});
+
 // ---------- Funksiyali tugmalar ----------
 // content: shop | bal | orders | promo | ref | help | topup | game:<id>
 async function runFunc(ctx, fn) {
@@ -417,6 +477,7 @@ async function handleText(ctx) {
     return true;
   }
   if (t === MENU.ref) { reset(ctx); await showReferral(ctx); return true; }
+  if (t === MENU.api) { reset(ctx); await showApi(ctx); return true; }
 
   const custom = topButtons().find((b) => b.label === t);
   if (custom) {

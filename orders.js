@@ -56,6 +56,23 @@ const orderKb = (id) =>
 async function processOrder(api, order) {
   const game = data().games.find((g) => g.id === order.gameId);
   const pkg = data().packages.find((p) => p.id === order.pkgId);
+  // 1) Kod ombori: provayder kerak emas — kod mijozga o'zi yuboriladi
+  if (pkg && pkg.delivery === "code") {
+    const code = (pkg.stock || []).shift();
+    if (code) {
+      order.code = code;
+      save();
+      await completeOrder(api, order, "stock");
+      if (!(pkg.stock || []).length) {
+        await notifyAdmins(api, `⚠️ <b>${esc(game.name)} — ${esc(pkg.name)}</b> kod ombori tugadi. Yangi kodlarni qo'shing (Panel → O'yinlar → paket → 🗂 Kod ombori).`);
+      }
+      return;
+    }
+    // Ombor bo'sh bo'lib qoldi — pul qaytariladi
+    await cancelOrder(api, order);
+    await notifyAdmins(api, `⚠️ Buyurtma #${order.id}: kod ombori bo'sh edi, pul mijozga qaytarildi.`);
+    return;
+  }
   let r;
   try {
     r = await provider.deliver(order, game, pkg);
@@ -79,7 +96,13 @@ async function processOrder(api, order) {
       `📨 Buyurtma #${order.id} qabul qilindi. Tez orada yetkaziladi, tayyor bo'lganda xabar beramiz.`
     );
     await notifyAdmins(api, adminOrderText(order), orderKb(order.id));
+  } else if (r.ok && r.pending) {
+    order.ref = r.ref || "";
+    order.providerPending = true;
+    save();
+    await safeSend(api, order.userId, `⏳ Buyurtma #${order.id} bajarilmoqda. Tayyor bo'lishi bilan xabar beramiz.`);
   } else if (r.ok) {
+    if (r.code) order.code = r.code;
     await completeOrder(api, order, r.ref);
   } else {
     await cancelOrder(api, order);
@@ -93,13 +116,16 @@ async function processOrder(api, order) {
 async function completeOrder(api, order, ref) {
   if (order.status === "done" || order.status === "failed") return false;
   order.status = "done";
+  order.providerPending = false;
   order.ref = ref || "";
   order.doneAt = Date.now();
   save();
   await safeSend(
     api,
     order.userId,
-    `✅ Buyurtma #${order.id} yetkazildi!\n🎮 ${esc(order.gameName)} — ${esc(order.pkgName)}\n🆔 <code>${esc(order.playerId)}</code>\n\nRahmat! 🙌`
+    order.code
+      ? `✅ Buyurtma #${order.id} tayyor!\n🎮 ${esc(order.gameName)} — ${esc(order.pkgName)}\n\n🎟 Kodingiz:\n<code>${esc(order.code)}</code>\n\nRahmat! 🙌`
+      : `✅ Buyurtma #${order.id} yetkazildi!\n🎮 ${esc(order.gameName)} — ${esc(order.pkgName)}\n🆔 <code>${esc(order.playerId)}</code>\n\nRahmat! 🙌`
   );
   await notifyChat(api, `✅ Buyurtma #${order.id} bajarildi: ${esc(order.gameName)} — ${esc(order.pkgName)}`);
   return true;
@@ -111,6 +137,7 @@ async function cancelOrder(api, order) {
   const u = data().users[order.userId];
   if (u) u.balance += order.price;
   order.status = "failed";
+  order.providerPending = false;
   save();
   await safeSend(
     api,
@@ -120,7 +147,46 @@ async function cancelOrder(api, order) {
   return true;
 }
 
+// Provayderda "jarayonda" turgan buyurtmalarni har 15 soniyada tekshiradi
+let polling = false;
+async function pollOnce(api) {
+  if (polling) return;
+  polling = true;
+  try {
+    const list = data().orders.filter((x) => x.status === "processing" && x.providerPending);
+    for (const o of list) {
+      if (Date.now() - o.createdAt > 30 * 60000) {
+        o.status = "pending";
+        o.providerPending = false;
+        save();
+        await notifyAdmins(
+          api,
+          `⚠️ Buyurtma #${o.id}: provayderdan 30 daqiqada natija kelmadi. Provayder kabinetida tekshirib, \"Bajarildi\" yoki \"Bekor qilish\" ni bosing.\n\n` + adminOrderText(o),
+          orderKb(o.id)
+        );
+        await safeSend(api, o.userId, `⏳ Buyurtma #${o.id} kutilganidan uzoq davom etmoqda. Admin tekshirmoqda.`);
+        continue;
+      }
+      let r;
+      try { r = await provider.checkOrder(o); } catch (e) { continue; }
+      if (r.state === "done") {
+        if (r.code) o.code = r.code;
+        await completeOrder(api, o, o.ref);
+      } else if (r.state === "failed") {
+        await cancelOrder(api, o);
+        await notifyAdmins(api, `⚠️ Buyurtma #${o.id} provayderda bajarilmadi (${esc(r.error || "FAILED")}). Pul mijozga qaytarildi.`);
+      }
+    }
+  } finally {
+    polling = false;
+  }
+}
+function startPolling(getApi) {
+  setInterval(() => pollOnce(getApi()).catch((e) => console.error("poll:", e.message)), 15000).unref();
+}
+
 module.exports = {
+  startPolling,
   processOrder,
   completeOrder,
   cancelOrder,
