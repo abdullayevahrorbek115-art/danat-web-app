@@ -301,7 +301,6 @@ function importOffers(gameKey, gameName, offers, rate, markup) {
     d.games.push(game);
     createdGame = true;
   }
-  d.settings.lx = { rate, markup }; // keyingi avto-yangilash shu kurs va ustama bilan
   let added = 0, skipped = 0, noPrice = 0;
   for (const o of offers.slice(0, 60)) {
     if (d.packages.some((p) => p.gameId === game.id && p.sku === o.id)) { skipped++; continue; }
@@ -309,7 +308,7 @@ function importOffers(gameKey, gameName, offers, rate, markup) {
     if (!Number.isFinite(usdt) || usdt <= 0) { noPrice++; continue; }
     const cost = Math.round(usdt * rate);
     const price = Math.max(100, Math.round((cost * (1 + markup / 100)) / 100) * 100);
-    d.packages.push({ id: nextId("pkg"), gameId: game.id, name: (o.name || o.id).slice(0, 40), price, active: true, sku: o.id, cost, auto: true });
+    d.packages.push({ id: nextId("pkg"), gameId: game.id, name: (o.name || o.id).slice(0, 40), price, active: true, sku: o.id, cost });
     added++;
   }
   save();
@@ -332,29 +331,4 @@ function pickGame(items, line) {
   return { ambiguous: cand.slice(0, 4).map((x) => x.name || x.key) };
 }
 
-// Provayder narxlariga ko'ra import qilingan (auto) paketlar narxi/tannarxini yangilaydi; katalogdan chiqib ketganini o'chiradi.
-async function syncAll() {
-  const d = data(), lx = d.settings.lx;
-  if (!lx || d.settings.providerMode !== "api") return { updated: 0, disabled: 0 };
-  let updated = 0, disabled = 0;
-  for (const g of d.games.filter((x) => x.providerCode)) {
-    let r;
-    try { r = await offers(g.providerCode); } catch (e) { continue; }
-    if (!r.offers.length) continue; // javob bo'sh yoki tushunarsiz — tegmaymiz
-    const byId = new Map(r.offers.map((o) => [o.id, o]));
-    for (const p of d.packages.filter((x) => x.gameId === g.id && x.sku)) {
-      const o = byId.get(p.sku);
-      if (!o) { if (p.auto && p.active) { p.active = false; disabled++; } continue; }
-      const usdt = Number(o.price);
-      if (!(usdt > 0)) continue;
-      const cost = Math.round(usdt * lx.rate);
-      const price = Math.max(100, Math.round((cost * (1 + lx.markup / 100)) / 100) * 100);
-      if (p.cost !== cost) p.cost = cost;
-      if (p.auto && p.price !== price) { p.price = price; updated++; }
-    }
-  }
-  save();
-  return { updated, disabled };
-}
-
-module.exports = { syncAll, pickGame, importOffers, checkId, deliver, checkOrder, catalog, offers, testCheck, cfg, DEFAULTS, LUDOVEX };
+module.exports = { pickGame, importOffers, checkId, deliver, checkOrder, catalog, offers, testCheck, cfg, DEFAULTS, LUDOVEX };

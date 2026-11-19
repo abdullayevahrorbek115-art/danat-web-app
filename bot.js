@@ -120,5 +120,3 @@ require("./payments").startServer(() => bot.api);
 require("./report").startReports(() => bot.api);
 // Provayderda jarayondagi buyurtmalarni kuzatish
 require("./orders").startPolling(() => bot.api);
-// Provayder narxlari o'zgarsa, import qilingan paketlar narxi o'zi yangilanadi (6 soatda bir)
-setInterval(() => require("./provider").syncAll().catch((e) => console.error("sync:", e.message)), 6 * 3600e3).unref();
