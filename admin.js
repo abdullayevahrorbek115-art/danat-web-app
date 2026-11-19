@@ -767,6 +767,7 @@ async function provScreen(ctx, group = "main") {
     kb.row().text("⚡ Ludovex ni ulash", "a:plx").row();
     kb.text("📋 Ludovex katalogi (kod va SKU)", "a:plc").row();
     kb.text("📥 Bir nechta o'yinni birdan import", "a:plm").row();
+    kb.text("🔄 Narxlarni hozir yangilash", "a:pls").row();
     kb.text("🔎 ID tekshirish sozlamasi", "a:pg:check").row();
     kb.text("📦 Buyurtma sozlamasi", "a:pg:order").row();
     kb.text("🧪 ID tekshirishni sinash", "a:pt").row();
@@ -803,6 +804,18 @@ adm.callbackQuery("a:plm", async (ctx) => {
     {},
     "📥 Birinchi qatorga <b>kurs va ustama foiz</b>, keyingi qatorlarga o'yin nomlarini yozing (har qatorga bitta, 10 tagacha):\n\n<code>12800 10\nfree fire cis\nmobile legends uz\npubg mobile auto</code>\n\nBot har bir o'yinni katalogdan topib, barcha paketlarini narxi bilan qo'shadi. Noaniq yoki topilmaganlarini alohida aytadi."
   );
+});
+adm.callbackQuery("a:pls", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  const lx = data().settings.lx;
+  if (!lx) return ctx.answerCallbackQuery({ text: "Avval o'yinlarni import qiling (kurs va ustama shunda saqlanadi)", show_alert: true });
+  await ctx.answerCallbackQuery({ text: "Yangilanmoqda..." });
+  try {
+    const r = await provider.syncAll();
+    await ctx.reply(`🔄 Narxi yangilangan paketlar: ${r.updated} ta\nKatalogdan chiqib, o'chirilganlar: ${r.disabled} ta\nKurs: ${lx.rate}, ustama: ${lx.markup}%\n\nQo'lda o'zgartirgan narxlaringiz tegilmaydi. Bot buni har 6 soatda o'zi ham qiladi.`);
+  } catch (e) {
+    await ctx.reply("❌ Xato: " + esc(e.message), { parse_mode: "HTML" });
+  }
 });
 adm.callbackQuery("a:plc", async (ctx) => {
   if (!(await mainOnly(ctx))) return;
@@ -1282,7 +1295,7 @@ async function adminText(ctx) {
         return true;
       }
       const p = findPkg(tmp.id);
-      if (p) { p.price = price; save(); }
+      if (p) { p.price = price; p.auto = false; save(); } // qo'lda o'zgartirilgan narx avto-yangilanmaydi
       reset(ctx);
       await pkgMenu(ctx, tmp.id);
       return true;
