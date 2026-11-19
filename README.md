@@ -142,3 +142,10 @@ Panel → 🔌 Provayder → 📋 Ludovex katalogi → o'yinni tanlang → **�
 
 ## 📝 Ko'p paketni birdan qo'shish
 Panel → 🎮 O'yinlar → o'yin → 📦 Paketlar → «📝 Ko'p paketni birdan qo'shish». Har qatorga bitta paket yozing: `60 UC - 12000`. Provayder kodi va SKU shart emas: Sozlamalarda rejim «qo'lda» bo'lsa, bu maydonlar panelda ko'rinmaydi va buyurtmani siz «Bajarildi» bilan yopasiz.
+
+## 🌐 Veb-do'kon (sayt)
+Bot serveri o'zi saytni ham ochadi: `https://sizning-domen/` (fayllar: `web.js`, `web/index.html`). Sayt botning o'sha bazasi, balansi va buyurtmalaridan foydalanadi, buyurtmalar bot kabi provayder yoki kod ombori orqali yetkaziladi.
+1. Domen https bilan serverga ulangan bo'lishi kerak (yuqoridagi «serverga joylash» bo'limi).
+2. BotFather → `/setdomain` → botingizni tanlab, domeningizni yuboring (Telegram orqali kirish shu bilan ishlaydi).
+3. Mijoz saytda «Telegram orqali kirish» ni bosadi (u botga avval `/start` bosgan bo'lishi kerak), keyin o'yin va paketni tanlab sotib oladi. Pul botdagi balansdan yechiladi. Hisobni to'ldirish tugmasi botga olib boradi (Click/Payme).
+Xavfsizlik: tokenlar imzolanadi (30 kun), IP bo'yicha daqiqasiga 60 so'rov cheklovi bor. Tannarx, SKU va provayder kodi saytda ko'rinmaydi.

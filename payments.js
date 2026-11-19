@@ -514,6 +514,9 @@ function createServer(getApi) {
     if (path === "/api/v1" || path.startsWith("/api/v1/")) {
       return require("./api").handle(req, res, getApi(), path, readBody);
     }
+    if (path === "/" || path === "/web" || path.startsWith("/web/")) {
+      return require("./web").handle(req, res, getApi(), path, readBody);
+    }
     if (req.method !== "POST") {
       res.writeHead(200);
       return res.end("OK");

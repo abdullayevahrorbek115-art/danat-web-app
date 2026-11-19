@@ -233,4 +233,4 @@ async function handle(req, res, botApi, fullPath, readBody) {
   }
 }
 
-module.exports = { handle, issueKey, revokeKey, userByKey, docsText, enabled, baseUrl };
+module.exports = { route, products, ApiError, handle, issueKey, revokeKey, userByKey, docsText, enabled, baseUrl };
