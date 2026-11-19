@@ -74,6 +74,8 @@ const pub = (o) => ({
 });
 
 function products() {
+  // Ixtiyoriy: admin yoqsa, provayder kodi va SKU ham ko'rsatiladi (standart holatda yashirin)
+  const showSku = !!data().settings.apiShowSku;
   return data()
     .games.filter((g) => g.active)
     .map((g) => ({
@@ -81,12 +83,14 @@ function products() {
       name: g.name,
       type: g.kind === "tg" ? "telegram" : "game",
       needs_server_id: !!g.needsServer,
+      ...(showSku ? { provider_game_code: g.providerCode || null } : {}),
       packages: data()
         .packages.filter((p) => p.gameId === g.id && p.active)
         .map((p) => ({
           id: p.id,
           name: p.name,
           price: p.price,
+          ...(showSku ? { sku: p.sku || null } : {}),
           delivery: p.delivery === "code" ? "code" : "account",
           in_stock: p.delivery === "code" ? (p.stock || []).length > 0 : true,
         })),

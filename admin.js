@@ -589,6 +589,7 @@ async function apiScreen(ctx) {
   withKey.forEach((u) => kb.text(`🔑 ${u.name || "Foydalanuvchi"} (${u.id})`, `a:aku:${u.id}`).row());
   kb.text("➕ ID bo'yicha API berish", "a:akn").row();
   kb.text(apiSvc.enabled() ? "🟢 API: yoqilgan (o'chirish)" : "🔴 API: o'chiq (yoqish)", "a:ake").row();
+  kb.text(data().settings.apiShowSku ? "🔓 SKU/provayder kodi: ko'rinadi" : "🔒 SKU/provayder kodi: yashirin", "a:aks").row();
   kb.text("⬅️ Orqaga", "a:home");
   await show(
     ctx,
@@ -605,6 +606,13 @@ adm.callbackQuery("a:ake", async (ctx) => {
   data().settings.apiEnabled = !apiSvc.enabled();
   save();
   await ctx.answerCallbackQuery({ text: apiSvc.enabled() ? "API yoqildi" : "API o'chirildi" });
+  await apiScreen(ctx);
+});
+adm.callbackQuery("a:aks", async (ctx) => {
+  if (!(await mainOnly(ctx))) return;
+  data().settings.apiShowSku = !data().settings.apiShowSku;
+  save();
+  await ctx.answerCallbackQuery({ text: data().settings.apiShowSku ? "Endi API da SKU va provayder kodi ko'rinadi" : "SKU va provayder kodi yashirildi", show_alert: true });
   await apiScreen(ctx);
 });
 adm.callbackQuery("a:akn", (ctx) => ask(ctx, "adm:apiuser", {}, "👤 API beriladigan foydalanuvchining Telegram ID sini yuboring (u botga /start bosgan bo'lishi kerak):"));
